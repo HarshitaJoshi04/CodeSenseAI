@@ -48,7 +48,7 @@ export const getCodeFiles = (repoPath) => {
                     continue;
                 }
 
-                scan(fullPath);
+                scan(fullPath);//this function keeops going deeper and deeper to scal=n files and pages;
             }
 
             // File

@@ -25,13 +25,13 @@ export const indexRepository = async (repoUrl) => {
 
                 text: chunks[i].pageContent,
 
-                metadata: chunks[i].metadata,
-             
+                metadata: {
+                    ...chunks[i].metadata,
+                    repoName: repository.repoName,
+                }
 
             });
 
         }
-
     }
-
 };

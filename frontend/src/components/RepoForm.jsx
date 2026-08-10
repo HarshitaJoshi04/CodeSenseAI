@@ -6,10 +6,9 @@ export default function RepoForm({ setRepoState, setChatContext }){
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  function validateGithubUrl(value){
-    return /^https:\/\/github\.com\/.+\/.+/.test(value)
-  }
-
+ function validateGithubUrl(value) {
+  return /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/?$/.test(value)
+}
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
@@ -67,7 +66,8 @@ export default function RepoForm({ setRepoState, setChatContext }){
         >
           {loading ? 'Analyzing repository...' : 'Analyze Repository'}
         </button>
-        <div className="text-sm text-slate-500">Ensure the repository is public or accessible to the backend.</div>
+        <div className="text-sm text-slate-500">Ensure the repository is public or accessible to the backend.
+        </div>
       </div>
     </form>
   )

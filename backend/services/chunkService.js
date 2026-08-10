@@ -7,8 +7,7 @@ const splitter = new RecursiveCharacterTextSplitter({
     chunkOverlap: 200
 });
 
-export const chunkFile = async (filePath) => {
-
+export const chunkFile = async (filePath, repoName, repoPath) => {
     const content = fs.readFileSync(filePath, "utf-8");
 
     const chunks = await splitter.createDocuments([content]);
@@ -17,9 +16,14 @@ export const chunkFile = async (filePath) => {
 
         chunk.metadata = {
             fileName: path.basename(filePath),
-            filePath,
+
+            filePath: path.relative(repoPath, filePath),
+
             chunkIndex: index,
-               language: "javascript"
+
+            language: "javascript",
+
+            repoName: repoName
         };
 
     });

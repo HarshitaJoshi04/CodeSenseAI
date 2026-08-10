@@ -25,7 +25,11 @@ export const processRepository = async (req, res) => {
         // 3. Process every file
         for (const file of files) {
 
-            const chunks = await chunkFile(file);
+            const chunks = await chunkFile(
+    file,
+    repository.repoName,
+    repository.repoPath
+);
 
             console.log(
                 `${file} → ${chunks.length} chunks`
@@ -33,7 +37,7 @@ export const processRepository = async (req, res) => {
 
             // 4. Store every chunk
             for (let i = 0; i < chunks.length; i++) {
-
+                console.log("CHUNK METADATA:", chunks[i].metadata);
                 await storeChunk({
 
                     id: `${repository.repoName}_${i}_${totalChunks}`,

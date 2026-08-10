@@ -25,6 +25,7 @@ export default function ChatPanel({ chatContext, repoState }){
   const [state, dispatch] = useReducer(reducer, initialState)
 
   const handleSend = async (text) => {
+    console.log('Sending question:', repoState);
     if (!text || !text.trim()) return
     if (repoState.status !== 'success') {
       alert('Please analyze a repository first')
@@ -35,7 +36,7 @@ export default function ChatPanel({ chatContext, repoState }){
     dispatch({ type: 'set_thinking', payload: true })
 
     try {
-      const res = await askQuestion(text)
+      const res = await askQuestion(text, repoState.repoName)
 
       if (res?.success) {
         dispatch({ type: 'add_assistant', payload: res.answer })
