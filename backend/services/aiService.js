@@ -9,7 +9,7 @@ const AI_SERVICE_URL = "http://127.0.0.1:8000";
 
 
 
-export const searchChunks = async (query,repoName) => {
+export const searchChunks = async (query,repoName,filePath=null) => {
 
     const response = await axios.post(
 
@@ -18,6 +18,7 @@ export const searchChunks = async (query,repoName) => {
         {
             query,
             repoName,
+            filePath,
             top_k: 5
         }
 

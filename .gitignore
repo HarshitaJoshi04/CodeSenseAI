@@ -1,16 +1,15 @@
 # Dependencies
 node_modules/
-**/node_modules/
 
 # Python
 .venv/
 venv/
 __pycache__/
+*.py[cod]
 
 # Environment variables
 .env
 .env.*
-
 !.env.example
 
 # Build
@@ -30,11 +29,9 @@ out/
 .DS_Store
 Thumbs.db
 
-# Python cache
-*.pyc
-
 # Coverage
 coverage/
+.pytest_cache/
 
 # AI / vector databases
 chroma/

@@ -27,13 +27,15 @@ def store(request: dict): #request contains the JSON sent by your Node backend.
 def search(request: dict):
     print("SEARCH REQUEST RECEIVED:", request)
     query = request["query"]
+    top_k = request.get("top_k", 5)
+    repo_name = request["repoName"]
+    file_path = request.get("filePath", None) # Get optional filter
 
-    top_k = request.get("top_k", 5)#Get top_k from the request. If the request doesn't provide it, use 5.
-    repo_name=request["repoName"]
     results = search_chunks(
         query=query,
         repo_name=repo_name,
-        top_k=top_k
+        top_k=top_k,
+        file_path=file_path
     )
 
     return results

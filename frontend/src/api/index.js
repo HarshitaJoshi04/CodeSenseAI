@@ -15,11 +15,14 @@ export const analyzeRepository = async (repoUrl) => {
   return response.data;
 };
 
-export const askQuestion = async (question,repoName) => {
+export const askQuestion = async (question,repoName,sessionId) => {
   const response = await api.post("/api/chat", {
     question,
-    repoName
+    repoName,
+    sessionId,
   });
 
   return response.data;
 };
+
+export default api;

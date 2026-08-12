@@ -43,20 +43,20 @@ export const indexRepository = async (repoUrl) => {
     });
 
     // 4. Save repository + complete files in MongoDB
-    await Repository.findOneAndUpdate(
-        {
-            repoName: repository.repoName,
-        },
-        {
-            repoName: repository.repoName,
-            repoPath: repository.repoPath,
-            files: fileData,
-        },
-        {
-            upsert: true,
-            new: true,
-        }
-    );
+const savedRepository = await Repository.findOneAndUpdate(
+    {
+        repoName: repository.repoName,
+    },
+    {
+        repoName: repository.repoName,
+        repoPath: repository.repoPath,
+        files: fileData,
+    },
+    {
+        upsert: true,
+        new: true,
+    }
+);
 
     console.log(
         `Repository ${repository.repoName} saved with ${fileData.length} files`
@@ -78,9 +78,11 @@ export const indexRepository = async (repoUrl) => {
         );
 
         for (let i = 0; i < chunks.length; i++) {
+            // Get unique file path key (e.g. src_components_Button_jsx)
+            const safeFilePath = chunks[i].metadata.filePath.replace(/[\/\\]/g, "_");
 
             await storeChunk({
-                id: `${repository.repoName}_${path.basename(file)}_${i}`,
+                id: `${repository.repoName}_${safeFilePath}_${i}`,
 
                 text: chunks[i].pageContent,
 
@@ -99,6 +101,7 @@ export const indexRepository = async (repoUrl) => {
     );
 
     return {
+            repositoryId: savedRepository._id,
         repoName: repository.repoName,
         files: files.length,
         chunks: totalChunks,

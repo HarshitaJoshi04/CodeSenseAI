@@ -1,378 +1,315 @@
 import { searchChunks } from "../services/aiService.js";
 import { askLLM } from "../services/llmService.js";
 import { routeQuestion } from "../services/localRouterService.js";
-
+import ChatSession from "../models/ChatSession.js";
+import ChatMessage from "../models/ChatMessage.js";
 import {
     getFilesByExtension,
     getFullFile,
 } from "../services/repositoryQueryService.js";
+import Repository from "../models/Repository.js";
 
-
+const saveAssistantMessage = async ({
+    sessionId,
+    answer = "",
+    code = "",
+    explanation = "",
+    sources = [],
+}) => {
+    await ChatMessage.create({
+        sessionId,
+        role: "assistant",
+        content: answer,
+        answer,
+        code,
+        explanation,
+        sources,
+    });
+};
 export const chat = async (req, res) => {
-
     try {
+        const { question, repoName, sessionId } = req.body;
 
-        const { question, repoName } = req.body;
+        console.log("CHAT BODY:", req.body);
+        console.log("QUESTION:", question);
+        console.log("REPO NAME:", repoName);
+        console.log("SESSION ID:", sessionId);
 
-
-        // ========================================
         // VALIDATION
-        // ========================================
 
-        if (!question || !repoName) {
-
+        if (!question || !repoName || !sessionId) {
             return res.status(400).json({
                 success: false,
-                message: "question and repoName are required",
+                message: "question, repoName and sessionId are required",
             });
-
         }
+        await ChatMessage.create({
+            sessionId,
+            role: "user",
+            content: question,
+        });
 
-
-        // ========================================
         // 1. LOCAL OLLAMA ROUTER
-        // ========================================
 
         const route = await routeQuestion(question);
 
-        console.log(
-            "LOCAL LLM ROUTE:",
-            route
-        );
-
+        console.log("LOCAL LLM ROUTE:", route);
 
         const queryType = route.intent;
 
-        console.log(
-            "QUERY TYPE:",
-            queryType
-        );
+        console.log("QUERY TYPE:", queryType);
 
-
-        // ========================================
         // 2. FILE COUNT → MONGODB
-        // ========================================
 
         if (queryType === "FILE_COUNT") {
+            const extensions = Array.isArray(route.extensions)
+                ? route.extensions
+                : [];
 
-            const extension = route.extension;
-
-
-            if (!extension) {
-
+            if (extensions.length === 0) {
                 return res.json({
-
                     success: true,
-
-                    answer:
-                        "I couldn't determine the file extension.",
-
+                    answer: "I couldn't determine the file extension.",
                     sources: [],
-
                 });
-
             }
 
+            const results = [];
 
-            const files =
-                await getFilesByExtension(
-                    repoName,
-                    extension
-                );
+            for (const extension of extensions) {
+                const files = await getFilesByExtension(repoName, extension);
 
+                results.push({
+                    extension,
+                    count: files.length,
+                    files,
+                });
+            }
 
-            console.log(
-                `MongoDB: Found ${files.length} ${extension} files`
+            const answer = results
+                .map((result) => `${result.count} ${result.extension} files`)
+                .join(" and ");
+
+            const sources = results.flatMap((result) =>
+                result.files.map((file) => ({
+                    file: file.filePath,
+                    source: "mongodb",
+                })),
             );
 
-
-            return res.json({
-
-                success: true,
-
-                answer:
-                    `There are ${files.length} ${extension} files in the repository.`,
-
-                sources:
-                    files.map(file => ({
-
-                        file: file.filePath,
-
-                        source: "mongodb",
-
-                    })),
-
+            await saveAssistantMessage({
+                sessionId,
+                answer,
+                sources,
             });
 
+            return res.json({
+                success: true,
+                answer,
+                sources,
+            });
         }
 
-
-        // ========================================
         // 3. FILE LIST → MONGODB
-        // ========================================
 
         if (queryType === "FILE_LIST") {
+            const extensions = Array.isArray(route.extensions)
+                ? route.extensions
+                : [];
 
-            const extension = route.extension;
-
-
-            if (!extension) {
-
+            if (extensions.length === 0) {
                 return res.json({
-
                     success: true,
-
-                    answer:
-                        "I couldn't determine the file extension.",
-
+                    answer: "I couldn't determine the file extensions.",
                     sources: [],
-
                 });
-
             }
 
+            const results = [];
 
-            const files =
-                await getFilesByExtension(
-                    repoName,
-                    extension
-                );
+            for (const extension of extensions) {
+                const files = await getFilesByExtension(repoName, extension);
 
-
-            return res.json({
-
-                success: true,
-
-                answer: files.length
-
-                    ? files
-                        .map(
-                            (file, index) =>
-                                `${index + 1}. ${file.fileName}`
-                        )
-                        .join("\n")
-
-                    : `No ${extension} files found.`,
-
-
-                sources:
-                    files.map(file => ({
-
-                        file: file.filePath,
-
-                        source: "mongodb",
-
-                    })),
-
-            });
-
-        }
-
-
-        // ========================================
-        // 4. FULL FILE → MONGODB
-        // ========================================
-
-        if (queryType === "FULL_FILE") {
-
-            const fileName = route.fileName;
-
-
-            if (!fileName) {
-
-                return res.json({
-
-                    success: true,
-
-                    answer:
-                        "Please specify the file name.",
-
-                    sources: [],
-
+                results.push({
+                    extension,
+                    files,
                 });
-
             }
 
+            const answer = results
+                .map((result) => {
+                    if (result.files.length === 0) {
+                        return `No ${result.extension} files found.`;
+                    }
 
-            const file =
-                await getFullFile(
-                    repoName,
-                    fileName
-                );
+                    return (
+                        `${result.extension} files:\n` +
+                        result.files
+                            .map((file, index) => `${index + 1}. ${file.fileName}`)
+                            .join("\n")
+                    );
+                })
+                .join("\n\n");
 
-
-            if (!file) {
-
-                return res.json({
-
-                    success: true,
-
-                    answer:
-                        `I couldn't find ${fileName} in the repository.`,
-
-                    sources: [],
-
-                });
-
-            }
-
-
-            return res.json({
-
-                success: true,
-
-                answer: file.content,
-
-                sources: [
-
-                    {
-
-                        file: file.filePath,
-
-                        source: "mongodb",
-
-                    },
-
-                ],
-
-            });
-
-        }
-
-
-        // ========================================
-        // 5. COMPLEX
-        // MONGODB + CHROMADB + GROQ
-        // ========================================
-
-        if (queryType === "COMPLEX") {
-
-            console.log(
-                "COMPLEX QUERY → MongoDB + ChromaDB"
+            const sources = results.flatMap((result) =>
+                result.files.map((file) => ({
+                    file: file.filePath,
+                    source: "mongodb",
+                })),
             );
 
+            await saveAssistantMessage({
+                sessionId,
+                answer,
+                sources,
+            });
 
-            const fileName =
-                route.fileName;
+            return res.json({
+                success: true,
+                answer,
+                sources,
+            });
+        }
 
+        // 4. FULL FILE → MONGODB
+
+        if (queryType === "FULL_FILE") {
+            const fileName = route.fileName;
+
+            if (!fileName) {
+                return res.json({
+                    success: true,
+                    answer: "Please specify the file name.",
+                    sources: [],
+                });
+            }
+
+            const file = await getFullFile(repoName, fileName);
+
+            if (!file) {
+                const answer = `I couldn't find ${fileName} in the repository.`;
+                await saveAssistantMessage({
+                    sessionId,
+                    answer,
+                    sources: [],
+                });
+                return res.json({
+                    success: true,
+                    answer,
+                    sources: [],
+                });
+            }
+
+            const answer = `Opened ${file.fileName} in the editor.`;
+            const code = file.content;
+            const sources = [
+                {
+                    file: file.filePath,
+                    source: "mongodb",
+                },
+            ];
+
+            // Save assistant message to Database
+            await saveAssistantMessage({
+                sessionId,
+                answer,
+                code,
+                sources,
+            });
+
+            return res.json({
+                success: true,
+                answer,
+                code, // Set to code so editor loads it
+                file: {
+                    fileName: file.fileName,
+                    filePath: file.filePath,
+                    extension: file.extension,
+                },
+                sources,
+            });
+        }
+
+        // COMPLEX
+        // MONGODB + CHROMADB + GROQ
+
+        if (queryType === "COMPLEX") {
+            console.log("COMPLEX QUERY → MongoDB + ChromaDB");
+
+            const fileName = route.fileName;
 
             let file = null;
 
             let mongoSource = null;
 
-
-            // ========================================
-            // 5A. MONGODB
+            // MONGODB
             // GET EXACT FILE
-            // ========================================
 
             if (fileName) {
-
-                file =
-                    await getFullFile(
-                        repoName,
-                        fileName
-                    );
-
+                file = await getFullFile(repoName, fileName);
 
                 if (file) {
-
-                    console.log(
-                        `MongoDB: Found ${fileName}`
-                    );
-
+                    console.log(`MongoDB: Found ${fileName}`);
 
                     mongoSource = {
+                        file: file.filePath,
 
-                        file:
-                            file.filePath,
-
-                        source:
-                            "mongodb",
-
+                        source: "mongodb",
                     };
-
                 } else {
-
-                    console.log(
-                        `MongoDB: ${fileName} not found`
-                    );
-
+                    console.log(`MongoDB: ${fileName} not found`);
                 }
-
             }
 
-
-            // ========================================
-            // 5B. CHROMADB
+            // CHROMADB
             // SEMANTIC SEARCH
-            // ========================================
 
-            console.log(
-                "Searching ChromaDB..."
+            console.log("Searching ChromaDB...");
+
+            const results = await searchChunks(
+                question,
+                repoName,
+                file ? file.filePath : null,
             );
 
+            const documents = results.documents?.[0] || [];
 
-            const results =
-                await searchChunks(
-                    question,
-                    repoName
-                );
+            const metadatas = results.metadatas?.[0] || [];
 
+            const chromaContext = documents
+                .map((document, index) => {
+                    const metadata = metadatas[index];
 
-            const documents =
-                results.documents?.[0] || [];
+                    return `
+                   File: ${metadata?.filePath || "Unknown"}
 
+                  Relevant Code:
 
-            const metadatas =
-                results.metadatas?.[0] || [];
+              ${document}`;
+                })
+                .join("\n\n");
 
-
-            const chromaContext =
-                documents
-                    .map(
-                        (document, index) => {
-
-                            const metadata =
-                                metadatas[index];
-
-
-                            return `
-File: ${metadata?.filePath || "Unknown"}
-
-Relevant Code:
-
-${document}
-`;
-
-                        }
-                    )
-                    .join("\n\n");
-
-
-            // ========================================
-            // 5C. CONTEXT FOR GROQ
-            // ========================================
+            //  CONTEXT FOR GROQ
 
             const context = `
 
-You are explaining code from a software repository.
+             You are explaining code from a software repository.
 
-The user asked:
+                The user asked:
 
-${question}
+             ${question}
 
-Target file:
+            Target file:
 
-${fileName || "Not specified"}
-
-
-Relevant code retrieved from ChromaDB:
-
-${chromaContext}
+            ${fileName || "Not specified"}
 
 
-IMPORTANT INSTRUCTIONS:
+                  Relevant code retrieved from ChromaDB:
+
+              ${chromaContext}
+
+
+                  IMPORTANT INSTRUCTIONS:
 
 - Explain the code clearly and accurately.
 - Use the retrieved code as your source of truth.
@@ -388,222 +325,298 @@ IMPORTANT INSTRUCTIONS:
 
 `;
 
-
-            // ========================================
-            // 5D. GROQ
+            // GROQ
             // GENERATE EXPLANATION ONLY
-            // ========================================
 
-            console.log(
-                "Sending explanation request to Groq..."
-            );
+            console.log("Sending explanation request to Groq...");
 
+            // Retrieve session history
+            const history = await ChatMessage.find({ sessionId })
+                .sort({ createdAt: 1 })
+                .limit(10); // Grab last 10 messages for context
 
-            const explanation =
-                await askLLM(
-                    question,
-                    context
-                );
+            console.log("Sending explanation request to Groq with history...");
+
+            const explanation = await askLLM(question, context, history);
 
             console.log("GROQ EXPLANATION RECEIVED:");
-console.log(explanation);
-            // ========================================
-            // 5E. SOURCES
-            // ========================================
+            console.log(explanation);
+
+            //  SOURCES
 
             const sources = [];
 
-
             if (mongoSource) {
-
-                sources.push(
-                    mongoSource
-                );
-
+                sources.push(mongoSource);
             }
 
+            metadatas.forEach((metadata) => {
+                sources.push({
+                    file: metadata.filePath,
 
-            metadatas.forEach(
-                metadata => {
+                    chunk: metadata.chunkIndex,
 
-                    sources.push({
+                    source: "chromadb",
+                });
+            });
 
-                        file:
-                            metadata.filePath,
+            //  RESPONSE
 
-                        chunk:
-                            metadata.chunkIndex,
+            await saveAssistantMessage({
+                sessionId,
 
-                        source:
-                            "chromadb",
+                code: file ? file.content : "",
 
-                    });
+                explanation,
 
-                }
-            );
-
-
-            // ========================================
-            // 5F. RESPONSE
-            // ========================================
-
+                sources,
+            });
             return res.json({
-
                 success: true,
-
 
                 // Exact source code
                 // Frontend will show this
                 // inside a code editor.
 
-                code:
-                    file
-                        ? file.content
-                        : null,
-
+                code: file ? file.content : null,
 
                 // File information
 
-                file:
-                    file
-                        ? {
+                file: file
+                    ? {
+                        fileName: file.fileName,
 
-                            fileName:
-                                file.fileName,
+                        filePath: file.filePath,
 
-                            filePath:
-                                file.filePath,
-
-                            extension:
-                                file.extension,
-
-                        }
-                        : null,
-
+                        extension: file.extension,
+                    }
+                    : null,
 
                 // LLM explanation
 
                 explanation,
 
-
                 sources,
-
             });
-
         }
 
-
-        // ========================================
-        // 6. NORMAL CODE QUESTION
+        // NORMAL CODE QUESTION
         // CHROMADB
-        // ========================================
 
-        console.log(
-            "Searching ChromaDB..."
-        );
+        console.log("Searching ChromaDB...");
 
+        const results = await searchChunks(question, repoName);
 
-        const results =
-            await searchChunks(
-                question,
-                repoName
-            );
+        const documents = results.documents?.[0] || [];
 
+        const metadatas = results.metadatas?.[0] || [];
 
-        const documents =
-            results.documents?.[0] || [];
+        const context = documents
+            .map((document, index) => {
+                const metadata = metadatas[index];
 
-
-        const metadatas =
-            results.metadatas?.[0] || [];
-
-
-        const context =
-            documents
-                .map(
-                    (document, index) => {
-
-                        const metadata =
-                            metadatas[index];
-
-
-                        return `
+                return `
 File: ${metadata?.filePath || "Unknown"}
 
 Code:
 
 ${document}
 `;
+            })
+            .join("\n\n");
 
-                    }
-                )
-                .join("\n\n");
-
-
-        // ========================================
         // 7. ASK GROQ
-        // ========================================
 
-        const answer =
-            await askLLM(
-                question,
-                context
-            );
+        // Retrieve session history
+        const history = await ChatMessage.find({ sessionId })
+            .sort({ createdAt: 1 })
+            .limit(10);
 
+        const answer = await askLLM(question, context, history);
 
-        // ========================================
         // 8. SOURCES
-        // ========================================
 
-        const sources =
-            metadatas.map(
-                metadata => ({
+        const sources = metadatas.map((metadata) => ({
+            file: metadata.filePath,
 
-                    file:
-                        metadata.filePath,
+            chunk: metadata.chunkIndex,
 
-                    chunk:
-                        metadata.chunkIndex,
+            source: "chromadb",
+        }));
 
-                    source:
-                        "chromadb",
-
-                })
-            );
-
-
-        // ========================================
         // 9. NORMAL RESPONSE
-        // ========================================
+
+        await saveAssistantMessage({
+            sessionId,
+            answer,
+            sources,
+        });
 
         return res.json({
-
             success: true,
-
             answer,
-
             sources,
-
         });
-
-
     } catch (error) {
-
-        console.error(
-            "Chat error:",
-            error
-        );
-
+        console.error("Chat error:", error);
 
         return res.status(500).json({
-
             success: false,
 
-            message:
-                error.message,
+            message: error.message,
+        });
+    }
+};
 
+export const getAllSessions = async (req, res) => {
+    try {
+        const sessions = await ChatSession.find()
+            .populate("repositoryId", "repoName")
+            .sort({ updatedAt: -1 });
+
+        res.json({
+            success: true,
+            sessions,
+        });
+    } catch (error) {
+        console.error("Failed to load all sessions:", error);
+
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+// New controllers for history endpoints
+export const getSessions = async (req, res) => {
+    try {
+        const { repositoryId } = req.params;
+
+        const sessions = await ChatSession.find({ repositoryId })
+            .populate("repositoryId", "repoName")
+            .sort({ createdAt: -1 });
+
+        res.json({
+            success: true,
+            sessions,
+        });
+    } catch (error) {
+        console.error("Get sessions error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const getSessionMessages = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+
+        const session = await ChatSession.findById(sessionId).populate(
+            "repositoryId",
+            "repoName",
+        );
+
+        if (!session) {
+            return res.status(404).json({
+                success: false,
+                message: "Session not found",
+            });
+        }
+
+        const messages = await ChatMessage.find({ sessionId }).sort({
+            createdAt: 1,
         });
 
-    }
+        res.json({
+            success: true,
+            session,
+            messages,
+        });
+    } catch (error) {
+        console.error("Get session messages error:", error);
 
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const createSession = async (req, res) => {
+    try {
+        const { repositoryId, title } = req.body;
+
+        if (!repositoryId) {
+            return res.status(400).json({
+                success: false,
+                message: "repositoryId is required",
+            });
+        }
+
+        const session = await ChatSession.create({
+            repositoryId,
+            title: title || "New Chat",
+        });
+
+        const populatedSession = await ChatSession.findById(session._id).populate(
+            "repositoryId",
+            "repoName",
+        );
+
+        res.json({
+            success: true,
+            session: populatedSession,
+        });
+    } catch (error) {
+        console.error("Create session error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+export const deleteSession = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                message: "sessionId is required",
+            });
+        }
+
+        // Delete all messages belonging to this session
+        await ChatMessage.deleteMany({
+            sessionId,
+        });
+
+        // Delete the session itself
+        const deletedSession = await ChatSession.findByIdAndDelete(sessionId);
+
+        if (!deletedSession) {
+            return res.status(404).json({
+                success: false,
+                message: "Chat session not found",
+            });
+        }
+
+        res.json({
+            success: true,
+            message: "Chat session deleted successfully",
+            sessionId,
+        });
+    } catch (error) {
+        console.error("Delete session error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
 };
