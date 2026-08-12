@@ -1,7 +1,4 @@
-import axios from "axios";
-
-const OLLAMA_URL = "http://localhost:11434/api/generate";
-
+import groq from "./groqClient.js";
 export const routeQuestion = async (question) => {
   const prompt = `
 You are the intelligent query router for CodeSense AI.
@@ -436,17 +433,21 @@ Return ONLY the JSON object.
 `;
 
   try {
-    const response = await axios.post(OLLAMA_URL, {
-      model: "qwen2.5:1.5b",
-      prompt,
-      stream: false,
-      format: "json",
-      options: {
-        temperature: 0,
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "system",
+          content: prompt,
+        },
+      ],
+      temperature: 0,
+      response_format: {
+        type: "json_object",
       },
     });
 
-    const result = JSON.parse(response.data.response);
+    const result = JSON.parse(response.choices[0].message.content);
 
     // Defensive normalization
     return {
