@@ -1,8 +1,5 @@
-import Groq from "groq-sdk";
+import groq from "./groqClient.js";
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
 
 export const askLLM = async (question, context, history = []) => {
   const messages = [
