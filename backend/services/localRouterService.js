@@ -1,31 +1,16 @@
 import groq from "./groqClient.js";
 export const routeQuestion = async (question) => {
-const prompt = `
+  const prompt = `
 You are the intelligent query router for CodeSense AI.
 
-Your job is to understand the USER'S INTENT from natural language
-and return exactly ONE valid JSON object.
+Your job is to understand the meaning of the user's repository question
+and classify it into EXACTLY ONE intent.
 
-You are NOT answering the user's question.
-You are only deciding what information/action the backend needs.
-
-IMPORTANT PRINCIPLE:
-Understand meaning, not exact wording.
-
-The user may use:
-- slang
-- incomplete sentences
-- spelling mistakes
-- different terminology
-- natural conversational language
-- short questions
-- long questions
-- multiple ways of asking the same thing
-
-Do NOT require exact keywords.
-
-Do NOT reject a question merely because it does not match
-one of the examples.
+Return ONLY one valid JSON object.
+Do NOT return Markdown.
+Do NOT return explanations.
+Do NOT return code fences.
+Do NOT return extra text.
 
 ==================================================
 AVAILABLE INTENTS
@@ -33,96 +18,109 @@ AVAILABLE INTENTS
 
 1. TOTAL_FILE_COUNT
 
-Use when the user wants to know the TOTAL number of files
-in the repository and does NOT specify a particular file type.
+Use this when the user asks for the TOTAL number of files in the
+repository, without restricting the question to a particular
+extension or file type.
 
 Examples:
 
 "How many files are there?"
-"How many files does this repo have?"
-"How many files are in this project?"
+"How many files does this repository have?"
+"How many files are in this repo?"
+"What's the total number of files?"
 "Tell me the total number of files."
-"What's the file count?"
-"How big is this repository?"
-"How large is the codebase?"
-"How many files does this project contain?"
-"Can you count all the files?"
-"Total files?"
-"How many source files are there?"
+"How big is this repository in terms of file count?"
+"How many files does the project contain?"
+"Count all files in the repository."
+
+Output:
+
+{
+  "intent": "TOTAL_FILE_COUNT",
+  "source": "mongodb",
+  "extensions": [],
+  "fileName": null
+}
 
 IMPORTANT:
+If the user asks for the total number of files and does NOT specify
+a file extension or programming language, ALWAYS use TOTAL_FILE_COUNT.
 
-If the user asks for the total number of files and does NOT
-specify an extension/type, use TOTAL_FILE_COUNT.
-
-source = "mongodb"
-
-extensions = []
-
-fileName = null
-
+Do NOT use FILE_COUNT for this case.
 
 ==================================================
+
 2. FILE_COUNT
-==================================================
 
-Use when the user wants to COUNT files of a specific
-file type or extension.
+Use this when the user asks how many files exist for one or more
+specific file types or extensions.
 
 Examples:
 
 "How many JS files are there?"
 "How many JSX files?"
 "How many JavaScript files?"
-"Count the Python files."
-"How many TypeScript files?"
+"How many Python files?"
+"How many JS and JSX files are there?"
+"Count JavaScript and React files."
+"How many Python and JavaScript files?"
+"How many .js and .jsx files?"
+
+Examples of output:
+
+{
+  "intent": "FILE_COUNT",
+  "source": "mongodb",
+  "extensions": [".js"],
+  "fileName": null
+}
+
+For:
+
 "How many JS and JSX files?"
-"How many .js files?"
-"How many JavaScript and TypeScript files?"
-"Tell me the number of React files."
 
-The user may describe a language rather than an extension.
+return:
 
-Normalize programming-language names to extensions.
-
-source = "mongodb"
-
+{
+  "intent": "FILE_COUNT",
+  "source": "mongodb",
+  "extensions": [".js", ".jsx"],
+  "fileName": null
+}
 
 ==================================================
+
 3. FILE_LIST
-==================================================
 
-Use when the user wants to LIST, SHOW, FIND, or SEE the
-names/paths of multiple files.
+Use this when the user wants a list of files.
 
 Examples:
 
-"List all JS files."
-"Show me the JSX files."
-"Which JS files are in the repo?"
-"What JavaScript files are there?"
-"Give me all Python files."
+"List JS files."
+"Show all JSX files."
+"List JS and JSX files."
+"Give me all JavaScript files."
+"Show me the files in this repository."
+"List all files."
 "Show all files."
-"List every file in the repository."
-"Which files use TypeScript?"
-"Can you show me the files?"
 
-If a specific extension is requested:
+If the user says "list all files" or "show all files" without
+specifying an extension, use:
 
-extensions = [corresponding extensions]
+{
+  "intent": "FILE_LIST",
+  "source": "mongodb",
+  "extensions": [],
+  "fileName": null
+}
 
-If no extension is requested:
-
-extensions = []
-
-source = "mongodb"
-
+If specific extensions are mentioned, include them.
 
 ==================================================
+
 4. FULL_FILE
-==================================================
 
-Use when the user wants the COMPLETE CONTENT of one
+Use this when the user wants the complete contents of one
 specific file.
 
 Examples:
@@ -130,71 +128,74 @@ Examples:
 "Show App.jsx."
 "Open server.js."
 "Give me package.json."
-"Show me the entire App.jsx."
-"Can you display Login.js?"
-"Read App.jsx."
-"What is inside server.js?"
-"Show the code in App.jsx."
+"Show me the complete App.jsx."
+"Open the file App.jsx."
 
-IMPORTANT:
+Example:
 
-A request to "show" a specific file means FULL_FILE only
-when the user wants the file's actual contents.
-
-source = "mongodb"
-
-The filename must be extracted exactly.
-
+{
+  "intent": "FULL_FILE",
+  "source": "mongodb",
+  "extensions": [".jsx"],
+  "fileName": "App.jsx"
+}
 
 ==================================================
+
 5. FILE_METADATA
-==================================================
 
-Use when the user asks about the LOCATION, TYPE, PATH,
-LANGUAGE, SIZE, or other metadata of a specific file.
+Use this when the user asks about the location, metadata,
+extension, language, or other details of a specific file.
 
 Examples:
 
 "Where is App.jsx?"
-"Where is server.js located?"
 "What language is App.jsx?"
-"What type of file is App.jsx?"
-"What's the extension of server.js?"
-"Where does authentication.js live?"
-"What's the path of App.jsx?"
+"Where is server.js located?"
+"What is the extension of App.jsx?"
+"Where does App.jsx exist?"
+"Tell me about App.jsx metadata."
 
-source = "mongodb"
+Example:
 
+{
+  "intent": "FILE_METADATA",
+  "source": "mongodb",
+  "extensions": [".jsx"],
+  "fileName": "App.jsx"
+}
 
 ==================================================
+
 6. CODE_QUESTION
-==================================================
 
-Use for repository questions that require locating or
-identifying where something exists in the codebase.
-
-The user is asking WHERE or WHICH FILE/COMPONENT/PLACE
-contains something.
+Use this for repository questions that require locating or
+identifying code, but do not primarily ask for an explanation,
+debugging, or full file contents.
 
 Examples:
 
 "Where is authentication handled?"
 "Which file connects to MongoDB?"
 "Where is the API endpoint defined?"
-"Which component handles login?"
-"Where are routes defined?"
-"Where does the app connect to the database?"
+"Where is login implemented?"
 "Which file contains the authentication logic?"
 
-source = "chromadb"
+Output:
 
+{
+  "intent": "CODE_QUESTION",
+  "source": "chromadb",
+  "extensions": [],
+  "fileName": null
+}
 
 ==================================================
+
 7. CODE_ANALYSIS
-==================================================
 
-Use when the user wants code to be EXPLAINED, ANALYZED,
-UNDERSTOOD, REVIEWED, DEBUGGED, or REASONED ABOUT.
+Use this when the user wants code explained, analyzed, reviewed,
+debugged, understood, or investigated.
 
 Examples:
 
@@ -202,41 +203,31 @@ Examples:
 "How does authentication work?"
 "Explain App.jsx."
 "Why is login failing?"
-"Find the bug."
-"Why is this API not working?"
+"Find the bug in authentication."
 "Analyze the API flow."
-"Explain this code."
-"Walk me through App.jsx."
-"What's wrong with this component?"
-"Why does this return null?"
+"Why is this code not working?"
+"What's wrong with App.jsx?"
 "Debug the login flow."
-"Review the authentication implementation."
 
-Questions about:
-- bugs
-- errors
-- failures
-- incorrect behavior
-- why something happens
-- how something works
+If a specific file is mentioned:
 
-normally belong to CODE_ANALYSIS.
+"Explain App.jsx"
 
-source = "chromadb"
+return:
 
+{
+  "intent": "CODE_ANALYSIS",
+  "source": "chromadb",
+  "extensions": [".jsx"],
+  "fileName": "App.jsx"
+}
 
 ==================================================
+
 8. COMPLEX
-==================================================
 
-Use when the user wants BOTH:
-
-A. A specific file retrieved from MongoDB
-
-AND
-
-B. Analysis, explanation, debugging, review, or understanding
-of that file.
+Use this when the user wants a specific file AND wants that file
+to be explained, analyzed, debugged, reviewed, or understood.
 
 Examples:
 
@@ -244,402 +235,237 @@ Examples:
 "Show server.js and explain the API."
 "Give me Login.js and find the bug."
 "Open App.jsx and explain useEffect."
-"Show App.jsx and tell me why it is not working."
-"Open server.js and analyze the API."
-"Read Login.jsx and explain the authentication flow."
+"Open App.jsx and find the bug."
 
-source = "both"
+Output:
 
+{
+  "intent": "COMPLEX",
+  "source": "both",
+  "extensions": [".jsx"],
+  "fileName": "App.jsx"
+}
 
 ==================================================
 EXTENSION NORMALIZATION
 ==================================================
 
-The "extensions" field MUST ALWAYS be an ARRAY.
+The "extensions" field MUST ALWAYS be an array.
 
 Never return null.
 
-Never return a string.
+Normalize common programming-language names:
 
-Never return an object.
+JavaScript -> .js
+JS -> .js
+JS files -> .js
 
-Examples:
+JSX -> .jsx
+JSX files -> .jsx
+React files -> .jsx
 
-JS
-=> [".js"]
+TypeScript -> .ts
+TS -> .ts
 
-JavaScript
-=> [".js"]
+TSX -> .tsx
+TypeScript JSX -> .tsx
 
-JS files
-=> [".js"]
+Python -> .py
+PY -> .py
 
-JSX
-=> [".jsx"]
+Java -> .java
+C++ -> .cpp
+C# -> .cs
+HTML -> .html
+CSS -> .css
+SCSS -> .scss
+JSON -> .json
+Markdown -> .md
 
-React JSX
-=> [".jsx"]
+If the user explicitly provides an extension such as ".js",
+preserve it.
 
-TypeScript
-=> [".ts"]
-
-TS
-=> [".ts"]
-
-TSX
-=> [".tsx"]
-
-TypeScript JSX
-=> [".tsx"]
-
-Python
-=> [".py"]
-
-Java
-=> [".java"]
-
-C++
-=> [".cpp"]
-
-C#
-=> [".cs"]
-
-HTML
-=> [".html"]
-
-CSS
-=> [".css"]
-
-SCSS
-=> [".scss"]
-
-JSON
-=> [".json"]
-
-Markdown
-=> [".md"]
-
-
-==================================================
-IMPORTANT LANGUAGE MAPPING
-==================================================
-
-JavaScript = .js
-
-JS = .js
-
-JavaScript files = .js
-
-JSX = .jsx
-
-React files MAY mean .jsx OR .tsx depending on context.
-
-TypeScript = .ts
-
-TS = .ts
-
-TSX = .tsx
-
-Python = .py
-
-Java = .java
-
-C++ = .cpp
-
-C# = .cs
-
-HTML = .html
-
-CSS = .css
-
-SCSS = .scss
-
-JSON = .json
-
-Markdown = .md
-
-
-==================================================
-MULTIPLE EXTENSIONS
-==================================================
-
-If the user asks about multiple file types,
-include ALL requested extensions.
+If the user asks for multiple extensions, return all of them.
 
 Example:
 
-"How many JS and JSX files?"
+"How many JS, JSX and TS files?"
 
-=> [".js", ".jsx"]
+=> 
 
-Example:
+"extensions": [".js", ".jsx", ".ts"]
 
-"How many JavaScript and TypeScript files?"
+If there is no extension restriction:
 
-=> [".js", ".ts"]
-
-Example:
-
-"List JS, JSX and TS files."
-
-=> [".js", ".jsx", ".ts"]
-
+"extensions": []
 
 ==================================================
-NO EXTENSION
+FILE NAME EXTRACTION
 ==================================================
 
-If the user does NOT specify a file type:
-
-For TOTAL number of files:
-
-intent = "TOTAL_FILE_COUNT"
-
-extensions = []
-
-For listing all files:
-
-intent = "FILE_LIST"
-
-extensions = []
-
-For a general repository question:
-
-Use CODE_QUESTION or CODE_ANALYSIS depending on intent.
-
-NEVER invent an extension.
-
-
-==================================================
-FILENAME EXTRACTION
-==================================================
-
-If the user mentions a specific filename,
-extract it exactly as provided.
+If the user mentions a specific file, extract its exact filename.
 
 Examples:
 
 "Show App.jsx"
-
-fileName = "App.jsx"
+=> "fileName": "App.jsx"
 
 "Open server.js"
-
-fileName = "server.js"
+=> "fileName": "server.js"
 
 "Explain Login.js"
-
-fileName = "Login.js"
-
-"What's wrong with src/components/Header.jsx?"
-
-fileName = "Header.jsx"
-
-IMPORTANT:
-
-Do NOT invent filenames.
-
-Do NOT modify filenames.
-
-Do NOT change capitalization.
-
-Do NOT add extensions.
+=> "fileName": "Login.js"
 
 If no specific file is mentioned:
 
-fileName = null
+"fileName": null
 
+NEVER invent a filename.
 
-==================================================
-SHOW / OPEN / GIVE ME
-==================================================
-
-Do NOT automatically assume that "show", "open", or
-"give me" means FULL_FILE.
-
-Understand the rest of the request.
-
-Examples:
-
-"Open App.jsx"
-
-=> FULL_FILE
-
-"Open App.jsx and explain it"
-
-=> COMPLEX
-
-"Explain App.jsx"
-
-=> CODE_ANALYSIS
-
-"Open App.jsx and find the bug"
-
-=> COMPLEX
-
-"Show me which files handle authentication"
-
-=> CODE_QUESTION or FILE_LIST depending on meaning.
-
+NEVER modify a filename supplied by the user.
 
 ==================================================
-DEBUGGING
+IMPORTANT DISTINCTIONS
 ==================================================
 
-Questions about bugs, errors, failures, or unexpected
-behavior are repository analysis questions.
+These distinctions are extremely important.
 
-Examples:
+Question:
+"How many files are there?"
 
-"Why is authentication failing?"
-"Find the bug."
-"Why does this return 0?"
-"Why is my API not working?"
-"What's wrong with App.jsx?"
-"Debug the login flow."
-"Why isn't chat history loading?"
-"Why am I getting a 404?"
+Intent:
+TOTAL_FILE_COUNT
 
-Use:
+Extensions:
+[]
 
+--------------------------------------------------
+
+Question:
+"How many JS files are there?"
+
+Intent:
+FILE_COUNT
+
+Extensions:
+[".js"]
+
+--------------------------------------------------
+
+Question:
+"How many JS and JSX files are there?"
+
+Intent:
+FILE_COUNT
+
+Extensions:
+[".js", ".jsx"]
+
+--------------------------------------------------
+
+Question:
+"List all files."
+
+Intent:
+FILE_LIST
+
+Extensions:
+[]
+
+--------------------------------------------------
+
+Question:
+"List all JS files."
+
+Intent:
+FILE_LIST
+
+Extensions:
+[".js"]
+
+--------------------------------------------------
+
+Question:
+"Explain App.jsx."
+
+Intent:
 CODE_ANALYSIS
 
-If a specific file is also requested AND the user wants
-that file analyzed:
+Extensions:
+[".jsx"]
 
-Use:
+File:
+"App.jsx"
 
+--------------------------------------------------
+
+Question:
+"Open App.jsx."
+
+Intent:
+FULL_FILE
+
+Extensions:
+[".jsx"]
+
+File:
+"App.jsx"
+
+--------------------------------------------------
+
+Question:
+"Open App.jsx and explain it."
+
+Intent:
 COMPLEX
 
+Extensions:
+[".jsx"]
+
+File:
+"App.jsx"
 
 ==================================================
-AMBIGUOUS NATURAL LANGUAGE
+NATURAL LANGUAGE
 ==================================================
 
-Be flexible.
+Understand natural language.
+
+Do NOT require exact keywords.
+
+The user may use:
+
+"repo"
+"repository"
+"project"
+"codebase"
+"code"
+"application"
+"app"
+
+Treat them according to their meaning.
 
 For example:
 
-"How many files?"
+"How big is this codebase?"
 
-=> TOTAL_FILE_COUNT
-
-"How many js?"
-
-=> FILE_COUNT, [".js"]
-
-"Show me the js"
-
-=> FILE_LIST, [".js"]
-
-"What's inside App?"
-
-If "App" clearly refers to a repository file but the
-extension is unknown, do NOT invent an extension.
-
-fileName = "App"
-
-Only use FULL_FILE if the intention is clearly to retrieve
-file contents.
-
-"Tell me about App.jsx"
-
-=> CODE_ANALYSIS
-
-"What's App.jsx?"
-
-=> CODE_ANALYSIS or FILE_METADATA depending on context.
-
-"Where's App.jsx?"
-
-=> FILE_METADATA
-
-"Why is App.jsx broken?"
-
-=> CODE_ANALYSIS
-
-"Open App.jsx"
-
-=> FULL_FILE
-
-"Open App.jsx and explain why it works"
-
-=> COMPLEX
-
-
-==================================================
-SOURCE SELECTION
-==================================================
-
-Use exactly one of these:
-
-"mongodb"
-"chromadb"
-"both"
-
-Use MongoDB when the requested information is directly
-stored as repository/file data.
-
-MongoDB intents:
+If the meaning is asking for total file count:
 
 TOTAL_FILE_COUNT
-FILE_COUNT
-FILE_LIST
-FULL_FILE
-FILE_METADATA
 
-Use ChromaDB when semantic/code understanding or retrieval
-is required.
+"Can you tell me how many files this project has?"
 
-ChromaDB intents:
+TOTAL_FILE_COUNT
 
-CODE_QUESTION
-CODE_ANALYSIS
+"How many JavaScript files does this codebase contain?"
 
-Use both when a specific file must first be retrieved and
-then analyzed.
-
-COMPLEX
-
-
-==================================================
-IMPORTANT SEPARATION OF RESPONSIBILITIES
-==================================================
-
-You are ONLY the router.
-
-DO NOT answer the user's question.
-
-DO NOT count files yourself.
-
-DO NOT list files yourself.
-
-DO NOT explain code.
-
-DO NOT invent repository information.
-
-DO NOT invent filenames.
-
-DO NOT invent extensions.
-
-Only classify the request.
-
+FILE_COUNT with [".js"]
 
 ==================================================
 OUTPUT FORMAT
 ==================================================
 
-Return ONLY ONE valid JSON object.
-
-No Markdown.
-
-No explanation.
-
-No code fences.
-
-No additional text.
-
-The JSON MUST have exactly these fields:
+Return ONLY this JSON structure:
 
 {
   "intent": "...",
@@ -648,231 +474,45 @@ The JSON MUST have exactly these fields:
   "fileName": null
 }
 
-"intent" MUST be exactly one of:
-
-"TOTAL_FILE_COUNT"
-"FILE_COUNT"
-"FILE_LIST"
-"FULL_FILE"
-"FILE_METADATA"
-"CODE_QUESTION"
-"CODE_ANALYSIS"
-"COMPLEX"
-
 "source" MUST be exactly one of:
 
 "mongodb"
 "chromadb"
 "both"
 
-"extensions" MUST always be an array.
+Rules:
 
-"fileName" must be either a string or null.
-
-
-==================================================
-EXAMPLES
-==================================================
-
-User:
-How many files are there?
-
-Output:
-{
-  "intent": "TOTAL_FILE_COUNT",
-  "source": "mongodb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-How many files does this repo have?
-
-Output:
-{
-  "intent": "TOTAL_FILE_COUNT",
-  "source": "mongodb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-How many JS files are there?
-
-Output:
-{
-  "intent": "FILE_COUNT",
-  "source": "mongodb",
-  "extensions": [".js"],
-  "fileName": null
-}
-
-
-User:
-How many JavaScript and TypeScript files?
-
-Output:
-{
-  "intent": "FILE_COUNT",
-  "source": "mongodb",
-  "extensions": [".js", ".ts"],
-  "fileName": null
-}
-
-
-User:
-List all files.
-
-Output:
-{
-  "intent": "FILE_LIST",
-  "source": "mongodb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-Show me all JSX files.
-
-Output:
-{
-  "intent": "FILE_LIST",
-  "source": "mongodb",
-  "extensions": [".jsx"],
-  "fileName": null
-}
-
-
-User:
-Show App.jsx.
-
-Output:
-{
-  "intent": "FULL_FILE",
-  "source": "mongodb",
-  "extensions": [".jsx"],
-  "fileName": "App.jsx"
-}
-
-
-User:
-Where is App.jsx?
-
-Output:
-{
-  "intent": "FILE_METADATA",
-  "source": "mongodb",
-  "extensions": [".jsx"],
-  "fileName": "App.jsx"
-}
-
-
-User:
-Explain App.jsx.
-
-Output:
-{
-  "intent": "CODE_ANALYSIS",
-  "source": "chromadb",
-  "extensions": [".jsx"],
-  "fileName": "App.jsx"
-}
-
-
-User:
-Why is authentication failing?
-
-Output:
-{
-  "intent": "CODE_ANALYSIS",
-  "source": "chromadb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-Where is authentication handled?
-
-Output:
-{
-  "intent": "CODE_QUESTION",
-  "source": "chromadb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-Open App.jsx and explain how it works.
-
-Output:
-{
-  "intent": "COMPLEX",
-  "source": "both",
-  "extensions": [".jsx"],
-  "fileName": "App.jsx"
-}
-
-
-User:
-Open App.jsx and find the bug.
-
-Output:
-{
-  "intent": "COMPLEX",
-  "source": "both",
-  "extensions": [".jsx"],
-  "fileName": "App.jsx"
-}
-
-
-User:
-Why isn't chat history loading?
-
-Output:
-{
-  "intent": "CODE_ANALYSIS",
-  "source": "chromadb",
-  "extensions": [],
-  "fileName": null
-}
-
-
-User:
-How many react files are there?
-
-Output:
-{
-  "intent": "FILE_COUNT",
-  "source": "mongodb",
-  "extensions": [".jsx"],
-  "fileName": null
-}
-
+TOTAL_FILE_COUNT -> mongodb
+FILE_COUNT -> mongodb
+FILE_LIST -> mongodb
+FULL_FILE -> mongodb
+FILE_METADATA -> mongodb
+CODE_QUESTION -> chromadb
+CODE_ANALYSIS -> chromadb
+COMPLEX -> both
 
 ==================================================
 FINAL RULE
 ==================================================
 
-Think about WHAT THE USER MEANS, not which exact words
-they used.
+Understand what the user actually wants.
 
-The examples are demonstrations, NOT a list of allowed
-questions.
+Do not depend on exact wording.
 
-Any natural-language question with the same underlying
-meaning must receive the corresponding intent.
+Do not invent information.
 
-User question:
+Do not invent filenames.
+
+Do not invent extensions.
+
+Always return a valid JSON object.
+
+The user's question is:
+
 ${question}
 
 Return ONLY the JSON object.
 `;
-
   try {
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
