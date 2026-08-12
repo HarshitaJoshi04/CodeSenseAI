@@ -4,7 +4,7 @@ import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import SourcesList from "./SourcesList";
 import api, { askQuestion } from "../api";
-import axios from "axios";
+
 
 const initialState = {
   messages: [],
@@ -113,94 +113,73 @@ export default function ChatPanel({ chatContext, repoState }) {
   // LOAD SELECTED SESSION
   // ==================================================
 
-  useEffect(() => {
-    const fetchHistory = async () => {
-      if (!sessionId) {
-        dispatch({
-          type: "clear_messages",
-        });
+useEffect(() => {
+  const fetchHistory = async () => {
+    if (!sessionId) {
+      dispatch({
+        type: "clear_messages",
+      });
+      return;
+    }
 
+    console.log("Loading chat session:", sessionId);
+
+    try {
+      const res = await api.get(
+        `/api/chat/sessions/${sessionId}/messages`
+      );
+
+      if (!res.data?.success) {
+        console.warn("Failed to load chat session:", res.data);
         return;
       }
 
-      console.log("Loading chat session:", sessionId);
+      const messages = res.data.messages || [];
 
-      try {
-        const res = await axios.get(`/api/chat/sessions/${sessionId}/messages`);
-        if (res.data?.success) {
-          dispatch({
-            type: "load_messages",
-            payload: res.data.messages,
-          });
+      console.log("Loaded messages:", messages);
 
-          const session = res.data.session;
+      // Load messages once
+      dispatch({
+        type: "load_messages",
+        payload: messages,
+      });
 
-          if (session) {
-            const repositoryId =
-              session.repositoryId?._id || session.repositoryId;
+      // Find latest assistant message
+      const assistantMessages = messages.filter(
+        (message) => message.role === "assistant"
+      );
 
-            const repoName = session.repositoryId?.repoName;
+      if (assistantMessages.length > 0) {
+        const lastMessage =
+          assistantMessages[assistantMessages.length - 1];
 
-            // Make sure the active chat is tied
-            // to the correct repository
-            if (repoName) {
-              // Don't need to change sessionId.
-              // App already owns the context.
-              console.log("Loaded historical session for:", repoName);
-            }
-          }
-
-          const assistantMsgs = res.data.messages.filter(
-            (m) => m.role === "assistant",
-          );
-
-          if (assistantMsgs.length > 0) {
-            const lastMsg = assistantMsgs[assistantMsgs.length - 1];
-
-            dispatch({
-              type: "set_sources",
-              payload: lastMsg.sources || [],
-            });
-          }
-        }
-
-        if (res.data?.success) {
-          const messages = res.data.messages || [];
-
-          console.log("Loaded messages:", messages);
-
-          dispatch({
-            type: "load_messages",
-            payload: messages,
-          });
-
-          // Find latest assistant sources
-
-          const assistantMessages = messages.filter(
-            (message) => message.role === "assistant",
-          );
-
-          if (assistantMessages.length > 0) {
-            const lastMessage = assistantMessages[assistantMessages.length - 1];
-
-            dispatch({
-              type: "set_sources",
-              payload: lastMessage.sources || [],
-            });
-          } else {
-            dispatch({
-              type: "set_sources",
-              payload: [],
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch chat history:", err);
+        dispatch({
+          type: "set_sources",
+          payload: lastMessage.sources || [],
+        });
+      } else {
+        dispatch({
+          type: "set_sources",
+          payload: [],
+        });
       }
-    };
 
-    fetchHistory();
-  }, [sessionId]);
+      // Information about the session/repository
+      const session = res.data.session;
+
+      if (session) {
+        console.log(
+          "Loaded historical session for:",
+          session.repositoryId?.repoName
+        );
+      }
+    } catch (err) {
+      console.error("Failed to fetch chat history:", err);
+    }
+  };
+
+  fetchHistory();
+}, [sessionId]);
 
   //send message
 
@@ -248,8 +227,8 @@ export default function ChatPanel({ chatContext, repoState }) {
     try {
       const res = await askQuestion(
         text,
-        chatContext.repoName,
-        chatContext.sessionId,
+        repoName,
+        sessionId,
       );
 
       console.log("CHAT RESPONSE:", res);
