@@ -18,6 +18,11 @@ The goal is simple:
 > **If the repository contains the answer, CodeSenseAI should retrieve the actual repository information instead of guessing.**
 
 ---
+##video 
+
+
+https://github.com/user-attachments/assets/26fd31fc-6e5a-439e-958f-cbbe8fa8a292
+
 
 ## 📌 Table of Contents
 
