@@ -89,6 +89,7 @@ const savedRepository = await Repository.findOneAndUpdate(
                 metadata: {
                     ...chunks[i].metadata,
                     repoName: repository.repoName,
+                    repoId: savedRepository._id.toString(),
                 },
             });
 

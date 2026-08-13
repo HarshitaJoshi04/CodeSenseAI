@@ -29,11 +29,13 @@ def search(request: dict):
     query = request["query"]
     top_k = request.get("top_k", 5)
     repo_name = request["repoName"]
+    repo_id = request.get("repoId", None)
     file_path = request.get("filePath", None) # Get optional filter
 
     results = search_chunks(
         query=query,
         repo_name=repo_name,
+        repo_id=repo_id,
         top_k=top_k,
         file_path=file_path
     )

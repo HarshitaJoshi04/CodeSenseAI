@@ -20,25 +20,29 @@ def store_chunk(chunk_id, text, metadata):
     )
 
 
-def search_chunks(query, repo_name, top_k=5, file_path=None):
+def search_chunks(query, repo_name, repo_id=None, top_k=5, file_path=None):
     print("QUERY:", query)
     print("REPO NAME:", repo_name)
+    print("REPO ID:", repo_id)
     print("FILTER FILE PATH:", file_path)
 
     query_embedding = generate_embedding(query)
 
-    # Dynamic filter condition using ChromaDB's $and operator
+    filters = []
+    if repo_id:
+        filters.append({"repoId": repo_id})
+    else:
+        filters.append({"repoName": repo_name})
+
     if file_path:
+        filters.append({"filePath": file_path})
+
+    if len(filters) > 1:
         where_clause = {
-            "$and": [
-                {"repoName": repo_name},
-                {"filePath": file_path}
-            ]
+            "$and": filters
         }
     else:
-        where_clause = {
-            "repoName": repo_name
-        }
+        where_clause = filters[0]
 
     results = collection.query(
         query_embeddings=[query_embedding],

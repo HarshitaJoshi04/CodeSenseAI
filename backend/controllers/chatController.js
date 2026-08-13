@@ -12,9 +12,7 @@ import {
   getRepositoryFiles, // Add this line
 } from "../services/repositoryQueryService.js";
 
-// ============================================================
-// SAVE ASSISTANT MESSAGE
-// ============================================================
+//save assistant message to database
 
 const saveAssistantMessage = async ({
   sessionId,
@@ -37,17 +35,83 @@ const saveAssistantMessage = async ({
   });
 };
 
-// ============================================================
-// CHAT
-// ============================================================
+const HISTORY_LIMIT = 10;
+
+//helper function to normalize file names for lookup
+
+const normalizeFileNameForLookup = (name) => {
+  if (!name) return "";
+  let clean = name.trim().toLowerCase();
+
+  if (
+    clean === "pakage.json" ||
+    clean === "package.jsn" ||
+    clean === "pakage.jsn"
+  ) {
+    return "package.json";
+  }
+  if (clean === "reademe.md" || clean === "readme.txt" || clean === "readme") {
+    return "readme.md";
+  }
+  if (clean === "app.js") {
+    return "app.jsx";
+  }
+  return clean;
+};
+
+const getRecentHistory = async (sessionId, limit = HISTORY_LIMIT) => {
+  const recentDesc = await ChatMessage.find({ sessionId })
+    .sort({ createdAt: -1 })
+    .limit(limit);
+
+  return recentDesc.reverse(); // oldest -> newest
+};
+
+const dedupeSources = (sources) => {
+  const seen = new Map();
+
+  for (const source of sources) {
+    if (!source?.file) continue;
+
+    const key =
+      source.source === "chromadb"
+        ? `${source.file}::${source.chunk ?? ""}`
+        : source.file;
+
+    if (!seen.has(key)) {
+      seen.set(key, source);
+    } else if (source.source === "mongodb") {
+      seen.set(key, source);
+    }
+  }
+
+  return Array.from(seen.values());
+};
+
+const safeSearchChunks = async (
+  question,
+  repoName,
+  repoId = null,
+  filePath = null,
+) => {
+  try {
+    const results = await searchChunks(question, repoName, repoId, filePath);
+    return {
+      documents: results?.documents?.[0] || [],
+      metadatas: results?.metadatas?.[0] || [],
+      failed: false,
+    };
+  } catch (error) {
+    console.error("ChromaDB search failed, continuing without it:", error);
+    return { documents: [], metadatas: [], failed: true };
+  }
+};
+
+//chat controller function to handle incoming chat requests and route them appropriately
 
 export const chat = async (req, res) => {
   try {
-    const {
-      question,
-      repoName,
-      sessionId,
-    } = req.body;
+    const { question, repoName, sessionId } = req.body;
 
     console.log("========================================");
     console.log("CHAT REQUEST");
@@ -56,21 +120,28 @@ export const chat = async (req, res) => {
     console.log("SESSION ID:", sessionId);
     console.log("========================================");
 
-    // ========================================================
-    // VALIDATION
-    // ========================================================
+    //validate required parameters
 
     if (!question || !repoName || !sessionId) {
       return res.status(400).json({
         success: false,
-        message:
-          "question, repoName and sessionId are required",
+        message: "question, repoName and sessionId are required",
       });
     }
 
-    // ========================================================
-    // SAVE USER MESSAGE
-    // ========================================================
+    const session =
+      await ChatSession.findById(sessionId).populate("repositoryId");
+    if (!session || !session.repositoryId) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session or repository not found",
+      });
+    }
+
+    const repoId = session.repositoryId._id.toString();
+    const dbRepoName = session.repositoryId.repoName;
+
+    //user message is saved to the database for the given session
 
     await ChatMessage.create({
       sessionId,
@@ -78,37 +149,40 @@ export const chat = async (req, res) => {
       content: question,
     });
 
-    // ========================================================
-    // ROUTER
-    // ========================================================
-    const history = await ChatMessage.find({ sessionId })
-      .sort({ createdAt: 1 })
-      .limit(10);
+    //router
+    const history = await getRecentHistory(sessionId);
 
-    const route = await routeQuestion(question,history);
+    const route = await routeQuestion(question, history);
+
+    if (route) {
+      if (
+        route.fileName &&
+        ["null", "undefined", "none", "empty"].includes(
+          route.fileName.trim().toLowerCase(),
+        )
+      ) {
+        route.fileName = null;
+      }
+      if (
+        route.path &&
+        ["null", "undefined", "none", "empty"].includes(
+          route.path.trim().toLowerCase(),
+        )
+      ) {
+        route.path = null;
+      }
+    }
 
     console.log("========== ROUTER DEBUG ==========");
-    console.log(
-      "QUESTION:",
-      question
-    );
-    console.log(
-      "ROUTE:",
-      JSON.stringify(route, null, 2)
-    );
-    console.log(
-      "==================================");
+    console.log("QUESTION:", question);
+    console.log("ROUTE:", JSON.stringify(route, null, 2));
+    console.log("==================================");
 
     const queryType = route?.intent;
 
-    console.log(
-      "QUERY TYPE:",
-      queryType
-    );
+    console.log("QUERY TYPE:", queryType);
 
-    // ========================================================
-    // 1. FILE COUNT
-    // ========================================================
+    //file count logic for METADATA queries
     //
     // IMPORTANT:
     //
@@ -119,243 +193,176 @@ export const chat = async (req, res) => {
     //     count ALL repository files from MongoDB.
     //
     // NEVER ask ChromaDB/Groq for exact file counts.
-    // ========================================================
 
-    if (queryType === "FILE_COUNT") {
+    if (queryType === "METADATA") {
+      const files = Array.isArray(session.repositoryId.files)
+        ? session.repositoryId.files
+        : [];
+
+      const isAskingName =
+        /repo(sitory)?\s+name|name\s+of\s+(this|the)\s+repo/i.test(question);
+
+      if (isAskingName) {
+        const answer = `The name of this repository is "${dbRepoName}".`;
+        const sources = [];
+
+        await saveAssistantMessage({ sessionId, answer, sources });
+        return res.json({ success: true, answer, sources });
+      }
+
       const extensions = Array.isArray(route.extensions)
         ? route.extensions.filter(Boolean)
         : [];
 
-      // ------------------------------------------------------
-      // TOTAL REPOSITORY FILE COUNT
-      // ------------------------------------------------------
+      if (extensions.length > 0) {
+        console.log("METADATA → EXTENSIONS:", extensions);
+        const results = [];
 
-      if (extensions.length === 0) {
-        console.log(
-          "FILE_COUNT → TOTAL REPOSITORY FILE COUNT"
-        );
-
-        const repository =
-          await Repository.findOne({
-            repoName,
-          });
-
-        if (!repository) {
-          const answer =
-            `Repository "${repoName}" was not found.`;
-
-          await saveAssistantMessage({
-            sessionId,
-            answer,
-          });
-
-          return res.json({
-            success: true,
-            answer,
-            sources: [],
-          });
-        }
-
-        let files =
-          Array.isArray(repository.files)
-            ? repository.files
-            : [];
-
-        // Check if the user specified a folder/path
-        const targetPath = route.path;
-        if (targetPath) {
-          const cleanTarget = targetPath.replace(/\\/g, "/").replace(/\/$/, "");
-          files = files.filter((file) => {
-            const cleanFilePath = file.filePath.replace(/\\/g, "/");
-            const pathSegments = cleanFilePath.split("/");
-            return cleanFilePath.startsWith(cleanTarget + "/") || 
-                   cleanFilePath === cleanTarget ||
-                   pathSegments.includes(cleanTarget);
-          });
-        }
-
-        const answer = targetPath
-          ? `There are ${files.length} files in the "${targetPath}" folder.`
-          : `There are ${files.length} files in the repository.`;
-
-        const sources =
-          files.map((file) => ({
-            file: file.filePath,
-            source: "mongodb",
-          }));
-
-        await saveAssistantMessage({
-          sessionId,
-          answer,
-          sources,
-        });
-
-        return res.json({
-          success: true,
-          answer,
-          sources,
-        });
-      }
-
-      // ------------------------------------------------------
-      // EXTENSION FILE COUNT
-      // ------------------------------------------------------
-
-      console.log(
-        "FILE_COUNT → EXTENSIONS:",
-        extensions
-      );
-
-      const results = [];
-
-      for (const extension of extensions) {
-        let files =
-          await getFilesByExtension(
-            repoName,
-            extension
+        for (const extension of extensions) {
+          let matchedFiles = files.filter(
+            (file) => file.extension.toLowerCase() === extension.toLowerCase(),
           );
 
-        // Filter by path if specified
-        const targetPath = route.path;
-        if (targetPath) {
-          const cleanTarget = targetPath.replace(/\\/g, "/").replace(/\/$/, "");
-          files = files.filter((file) => {
-            const cleanFilePath = file.filePath.replace(/\\/g, "/");
-            const pathSegments = cleanFilePath.split("/");
-            return cleanFilePath.startsWith(cleanTarget + "/") || 
-                   cleanFilePath === cleanTarget ||
-                   pathSegments.includes(cleanTarget);
+          const targetPath = route.path;
+          if (targetPath) {
+            const cleanTarget = targetPath
+              .replace(/\\/g, "/")
+              .replace(/\/$/, "");
+            matchedFiles = matchedFiles.filter((file) => {
+              const cleanFilePath = file.filePath.replace(/\\/g, "/");
+              const pathSegments = cleanFilePath.split("/");
+              return (
+                cleanFilePath.startsWith(cleanTarget + "/") ||
+                cleanFilePath === cleanTarget ||
+                pathSegments.includes(cleanTarget)
+              );
+            });
+          }
+
+          results.push({
+            extension,
+            count: matchedFiles.length,
+            files: matchedFiles,
           });
         }
 
-        results.push({
-          extension,
-          count: files.length,
-          files,
-        });
-      }
+        const folderText = route.path ? ` in the "${route.path}" folder` : "";
+        const answer = results
+          .map(
+            (result) =>
+              `There are ${result.count} ${result.extension} files${folderText}.`,
+          )
+          .join("\n");
 
-      const answer = results
-        .map((result) => {
-          const folderText = route.path ? ` in the "${route.path}" folder` : "";
-          return `There are ${result.count} ${result.extension} files${folderText}.`;
-        })
-        .join("\n");
-
-      const sources =
-        results.flatMap(
-          (result) =>
-            result.files.map(
-              (file) => ({
-                file: file.filePath,
-                source: "mongodb",
-              })
-            )
+        const sources = dedupeSources(
+          results.flatMap((result) =>
+            result.files.map((file) => ({
+              file: file.filePath,
+              source: "mongodb",
+            })),
+          ),
         );
 
-      await saveAssistantMessage({
-        sessionId,
-        answer,
-        sources,
-      });
+        await saveAssistantMessage({ sessionId, answer, sources });
+        return res.json({ success: true, answer, sources });
+      }
 
-      return res.json({
-        success: true,
-        answer,
-        sources,
-      });
+      const targetPath = route.path;
+      if (targetPath) {
+        console.log("METADATA → FOLDER PATH:", targetPath);
+        const cleanTarget = targetPath.replace(/\\/g, "/").replace(/\/$/, "");
+        const matchedFiles = files.filter((file) => {
+          const cleanFilePath = file.filePath.replace(/\\/g, "/");
+          const pathSegments = cleanFilePath.split("/");
+          return (
+            cleanFilePath.startsWith(cleanTarget + "/") ||
+            cleanFilePath === cleanTarget ||
+            pathSegments.includes(cleanTarget)
+          );
+        });
+
+        const answer = `There are ${matchedFiles.length} files in the "${targetPath}" folder.`;
+        const sources = matchedFiles.map((file) => ({
+          file: file.filePath,
+          source: "mongodb",
+        }));
+
+        await saveAssistantMessage({ sessionId, answer, sources });
+        return res.json({ success: true, answer, sources });
+      }
+
+      console.log("METADATA → TOTAL REPOSITORY FILE COUNT");
+      const answer = `There are ${files.length} files in the repository.`;
+      const sources = files.map((file) => ({
+        file: file.filePath,
+        source: "mongodb",
+      }));
+
+      await saveAssistantMessage({ sessionId, answer, sources });
+      return res.json({ success: true, answer, sources });
     }
 
-    // ========================================================
-    // 2. FILE LIST
-    // ========================================================
+    //filecount logic for FILE_LIST queries
 
     if (queryType === "FILE_LIST") {
-      const extensions = Array.isArray(
-        route.extensions
-      )
+      const files = Array.isArray(session.repositoryId.files)
+        ? session.repositoryId.files
+        : [];
+
+      const extensions = Array.isArray(route.extensions)
         ? route.extensions.filter(Boolean)
         : [];
 
-      if (extensions.length === 0) {
-        const answer =
-          "I couldn't determine the file extension.";
+      const targetPath = route.path;
 
-        await saveAssistantMessage({
-          sessionId,
-          answer,
-        });
+      console.log("FILE_LIST → extensions:", extensions, "path:", targetPath);
 
-        return res.json({
-          success: true,
-          answer,
-          sources: [],
-        });
-      }
+      let matchedFiles = [...files];
 
-      console.log(
-        "FILE_LIST → EXTENSIONS:",
-        extensions
-      );
-
-      const results = [];
-
-      for (const extension of extensions) {
-        let files =
-          await getFilesByExtension(
-            repoName,
-            extension
-          );
-
-        // Filter by path if specified
-        const targetPath = route.path;
-        if (targetPath) {
-          const cleanTarget = targetPath.replace(/\\/g, "/").replace(/\/$/, "");
-          files = files.filter((file) => {
-            const cleanFilePath = file.filePath.replace(/\\/g, "/");
-            const pathSegments = cleanFilePath.split("/");
-            return cleanFilePath.startsWith(cleanTarget + "/") || 
-                   cleanFilePath === cleanTarget ||
-                   pathSegments.includes(cleanTarget);
-          });
-        }
-
-        results.push({
-          extension,
-          files,
-        });
-      }
-
-      const answer = results
-        .map((result) => {
-          if (result.files.length === 0) {
-            const folderText = route.path ? ` in the "${route.path}" folder` : "";
-            return `No ${result.extension} files found${folderText}.`;
-          }
-
-          const folderText = route.path ? ` in the "${route.path}" folder` : "";
+      if (targetPath) {
+        const cleanTarget = targetPath.replace(/\\/g, "/").replace(/\/$/, "");
+        matchedFiles = matchedFiles.filter((file) => {
+          const cleanFilePath = file.filePath.replace(/\\/g, "/");
+          const pathSegments = cleanFilePath.split("/");
           return (
-            `${result.extension} files${folderText}:\n` +
-            result.files
-              .map(
-                (file, index) =>
-                  `${index + 1}. ${file.fileName}`
-              )
-              .join("\n")
+            cleanFilePath.startsWith(cleanTarget + "/") ||
+            cleanFilePath === cleanTarget ||
+            pathSegments.includes(cleanTarget)
           );
-        })
-        .join("\n\n");
+        });
+      }
 
-      const sources =
-        results.flatMap(
-          (result) =>
-            result.files.map(
-              (file) => ({
-                file: file.filePath,
-                source: "mongodb",
-              })
-            )
+      if (extensions.length > 0) {
+        matchedFiles = matchedFiles.filter((file) =>
+          extensions.some(
+            (ext) => file.extension.toLowerCase() === ext.toLowerCase(),
+          ),
         );
+      }
+
+      let answer = "";
+      if (matchedFiles.length === 0) {
+        const extText =
+          extensions.length > 0 ? ` matching ${extensions.join(", ")}` : "";
+        const folderText = targetPath ? ` in the "${targetPath}" folder` : "";
+        answer = `No files found${extText}${folderText}.`;
+      } else {
+        const extText = extensions.length > 0 ? ` ${extensions.join("/")}` : "";
+        const folderText = targetPath
+          ? ` in the "${targetPath}" folder`
+          : " in the repository";
+
+        answer =
+          `There are ${matchedFiles.length}${extText} files found${folderText}:\n\n` +
+          matchedFiles
+            .map((file, index) => `${index + 1}. ${file.filePath}`)
+            .join("\n");
+      }
+
+      const sources = matchedFiles.map((file) => ({
+        file: file.filePath,
+        source: "mongodb",
+      }));
 
       await saveAssistantMessage({
         sessionId,
@@ -370,242 +377,178 @@ export const chat = async (req, res) => {
       });
     }
 
-    // ========================================================
-    // 3. FULL FILE
-    // ========================================================
+    //file retrieval logic for EXACT_FILE queries
 
-    if (queryType === "FULL_FILE") {
-      const fileName = route.fileName;
+    if (queryType === "EXACT_FILE") {
+      let fileName = route.fileName ? route.fileName.trim() : null;
+      let targetPath = route.path ? route.path.trim() : null;
 
-      if (!fileName) {
-        const answer =
-          "Please specify the file name.";
-
-        await saveAssistantMessage({
-          sessionId,
-          answer,
-        });
-
-        return res.json({
-          success: true,
-          answer,
-          sources: [],
-        });
+      if (!fileName && !targetPath) {
+        const answer = "Please specify a file name or path.";
+        await saveAssistantMessage({ sessionId, answer });
+        return res.json({ success: true, answer, sources: [] });
       }
+
+      const normFileName = fileName ? normalizeFileNameForLookup(fileName) : "";
+      const normTargetPath = targetPath
+        ? targetPath.replace(/\\/g, "/").toLowerCase()
+        : "";
 
       console.log(
-        "FULL_FILE →",
-        fileName
+        `[EXACT_FILE DEBUG] Requested Name: "${fileName}" (Normalized: "${normFileName}"), Target Path: "${targetPath}"`,
       );
 
-      const file =
-        await getFullFile(
-          repoName,
-          fileName
-        );
+      const files = Array.isArray(session.repositoryId.files)
+        ? session.repositoryId.files
+        : [];
 
-      if (!file) {
-        const answer =
-          `I couldn't find ${fileName} in the repository.`;
-
-        await saveAssistantMessage({
-          sessionId,
-          answer,
+      let matches = [];
+      if (normFileName) {
+        matches = files.filter((f) => {
+          const fName = f.fileName.toLowerCase();
+          const fPath = f.filePath.replace(/\\/g, "/").toLowerCase();
+          return (
+            fName === normFileName ||
+            fPath.endsWith("/" + normFileName) ||
+            fPath === normFileName
+          );
         });
-
-        return res.json({
-          success: true,
-          answer,
-          sources: [],
+      } else if (normTargetPath) {
+        matches = files.filter((f) => {
+          const fPath = f.filePath.replace(/\\/g, "/").toLowerCase();
+          return (
+            fPath === normTargetPath || fPath.endsWith("/" + normTargetPath)
+          );
         });
       }
 
-      const answer =
-        `Opened ${file.fileName} in the editor.`;
+      if (normFileName && normTargetPath) {
+        matches = matches.filter((f) => {
+          const fPath = f.filePath.replace(/\\/g, "/").toLowerCase();
+          return fPath.includes(normTargetPath);
+        });
+      }
 
-      const code = file.content;
+      console.log("========== EXACT FILE RETRIEVAL LOG ==========");
+      console.log("Requested Filename:", fileName || "(none)");
+      console.log("Normalized Filename:", normFileName || "(none)");
+      console.log("Repository ID:", repoId);
+      console.log("Manifest Files Searched:", files.length);
+      console.log("Matches Found Count:", matches.length);
+      console.log(
+        "Matched File Paths:",
+        matches.map((m) => m.filePath),
+      );
+      console.log("Match Found:", matches.length > 0);
+      console.log("==============================================");
 
-      const sources = [
-        {
-          file: file.filePath,
+      if (matches.length > 1) {
+        const answer =
+          `I found multiple files matching that name:\n` +
+          matches.map((f, index) => `${index + 1}. ${f.filePath}`).join("\n") +
+          `\n\nPlease clarify which file you want to see.`;
+
+        const sources = matches.map((f) => ({
+          file: f.filePath,
           source: "mongodb",
-        },
-      ];
+        }));
 
-      await saveAssistantMessage({
-        sessionId,
-        answer,
-        code,
-        sources,
-      });
+        await saveAssistantMessage({ sessionId, answer, sources });
+        return res.json({ success: true, answer, sources });
+      }
+
+      if (matches.length === 0) {
+        const missingName = fileName || targetPath;
+        const answer = `No file named \`${missingName}\` was found in the repository.`;
+
+        await saveAssistantMessage({ sessionId, answer });
+        return res.json({ success: true, answer, sources: [] });
+      }
+
+      const file = matches[0];
+      const isShowQuery =
+        /show|open|display|content|inside|give\s+me|read|view/i.test(question);
+      const isExistenceQuery = /exists|is\s+there|do\s+we\s+have/i.test(
+        question,
+      );
+
+      let answer = "";
+      let code = null;
+
+      if (isShowQuery) {
+        answer = `Opened ${file.fileName} in the editor.`;
+        code = file.content;
+      } else if (isExistenceQuery) {
+        answer = `Yes. There is a file named \`${file.fileName}\` at: \n\n${file.filePath}`;
+      } else {
+        answer = `The file \`${file.fileName}\` is located at: \n\n${file.filePath}`;
+      }
+
+      const sources = [{ file: file.filePath, source: "mongodb" }];
+
+      await saveAssistantMessage({ sessionId, answer, code, sources });
 
       return res.json({
         success: true,
-
         answer,
-
         code,
-
-        file: {
-          fileName:
-            file.fileName,
-
-          filePath:
-            file.filePath,
-
-          extension:
-            file.extension,
-        },
-
+        file: isShowQuery
+          ? {
+              fileName: file.fileName,
+              filePath: file.filePath,
+              extension: file.extension,
+            }
+          : null,
         sources,
       });
     }
+    //code explanation logic for CODE_EXPLANATION queries
 
-    // ========================================================
-    // 4. COMPLEX
-    // MongoDB + ChromaDB + Groq
-    // ========================================================
-
-    if (queryType === "COMPLEX") {
-      console.log(
-        "========================================"
-      );
-      console.log(
-        "COMPLEX QUERY → MongoDB + ChromaDB + Groq"
-      );
-      console.log(
-        "========================================"
-      );
-
-      const fileName =
-        route.fileName;
-
-      let file = null;
-
+    if (queryType === "CODE_EXPLANATION") {
+      const fileName = route.fileName;
+      let targetFile = null;
       let mongoSource = null;
 
-      // ------------------------------------------------------
-      // 4A. GET EXACT FILE FROM MONGODB
-      // ------------------------------------------------------
+      const files = Array.isArray(session.repositoryId.files)
+        ? session.repositoryId.files
+        : [];
 
       if (fileName) {
-        console.log(
-          "MongoDB lookup:",
-          fileName
+        targetFile = files.find(
+          (f) => f.fileName.toLowerCase() === fileName.toLowerCase(),
         );
 
-        file =
-          await getFullFile(
-            repoName,
-            fileName
-          );
-
-        if (file) {
-          console.log(
-            `MongoDB: Found ${fileName}`
-          );
-
+        if (targetFile) {
           mongoSource = {
-            file:
-              file.filePath,
-
-            source:
-              "mongodb",
+            file: targetFile.filePath,
+            source: "mongodb",
           };
-        } else {
-          console.log(
-            `MongoDB: ${fileName} NOT FOUND`
-          );
         }
       }
 
-      // ------------------------------------------------------
-      // 4B. CHROMADB SEMANTIC SEARCH
-      // ------------------------------------------------------
-
-      console.log(
-        "Searching ChromaDB..."
+      const { documents, metadatas } = await safeSearchChunks(
+        question,
+        dbRepoName,
+        repoId,
+        targetFile ? targetFile.filePath : null,
       );
 
-      const results =
-        await searchChunks(
-          question,
-          repoName,
-          file
-            ? file.filePath
-            : null
-        );
-
-      const documents =
-        results?.documents?.[0] || [];
-
-      const metadatas =
-        results?.metadatas?.[0] || [];
-
-      console.log(
-        "ChromaDB documents:",
-        documents.length
-      );
-
-      console.log(
-        "ChromaDB metadata:",
-        metadatas.length
-      );
-
-      // ------------------------------------------------------
-      // 4C. BUILD CHROMADB CONTEXT
-      // ------------------------------------------------------
-
-      const chromaContext =
-        documents
-          .map(
-            (document, index) => {
-              const metadata =
-                metadatas[index];
-
-              return `
-File:
-${metadata?.filePath || "Unknown"}
-
-Relevant Code:
-${document}
-`;
-            }
-          )
-          .join("\n\n");
-
-      // ------------------------------------------------------
-      // 4D. BUILD REPOSITORY CONTEXT
-      //
-      // IMPORTANT:
-      //
-      // MongoDB exact file is PRIMARY.
-      // ChromaDB is SUPPORTING context.
-      // ------------------------------------------------------
+      const chromaContext = documents
+        .map(
+          (doc, idx) =>
+            `File: ${metadatas[idx]?.filePath || "Unknown"}\nCode:\n${doc}`,
+        )
+        .join("\n\n");
 
       let repositoryContext = "";
-
-      if (file) {
+      if (targetFile) {
         repositoryContext += `
 ==================================================
-EXACT FILE FROM MONGODB
+TARGET FILE CONTENT (mongodb)
 ==================================================
-
-File Name:
-${file.fileName}
-
-File Path:
-${file.filePath}
-
-Extension:
-${file.extension}
-
-COMPLETE FILE CONTENT:
-
-${file.content}
-
-==================================================
-END EXACT FILE
+File Path: ${targetFile.filePath}
+Content:
+${targetFile.content}
 ==================================================
 `;
       }
@@ -613,498 +556,371 @@ END EXACT FILE
       if (chromaContext) {
         repositoryContext += `
 ==================================================
-SEMANTICALLY RELEVANT CODE FROM CHROMADB
+SUPPORTING CODE CHUNKS (chromadb)
 ==================================================
-
 ${chromaContext}
-
-==================================================
-END CHROMADB CONTEXT
 ==================================================
 `;
       }
 
-      // ------------------------------------------------------
-      // 4E. SESSION HISTORY
-      // ------------------------------------------------------
-
-
-
-      // ------------------------------------------------------
-      // 4F. GROQ
-      // ------------------------------------------------------
-
-      console.log(
-        "Sending explanation request to Groq..."
-      );
-
-      const explanation =
-        await askLLM(
-          question,
-          repositoryContext,
-          history
-        );
-
-      console.log(
-        "GROQ EXPLANATION RECEIVED:"
-      );
-
-      console.log(
-        explanation
-      );
-
-      // ------------------------------------------------------
-      // 4G. SOURCES
-      // ------------------------------------------------------
+      console.log("Sending CODE_EXPLANATION request to Groq...");
+      const explanation = await askLLM(question, repositoryContext, history);
 
       const sources = [];
-
-      if (mongoSource) {
-        sources.push(
-          mongoSource
-        );
-      }
-
-      metadatas.forEach(
-        (metadata) => {
-          if (
-            metadata?.filePath
-          ) {
-            sources.push({
-              file:
-                metadata.filePath,
-
-              chunk:
-                metadata.chunkIndex,
-
-              source:
-                "chromadb",
-            });
-          }
+      if (mongoSource) sources.push(mongoSource);
+      metadatas.forEach((m) => {
+        if (m?.filePath) {
+          sources.push({
+            file: m.filePath,
+            chunk: m.chunkIndex,
+            source: "chromadb",
+          });
         }
-      );
+      });
 
-      // ------------------------------------------------------
-      // 4H. SAVE ASSISTANT MESSAGE
-      // ------------------------------------------------------
+      const deduped = dedupeSources(sources);
 
       await saveAssistantMessage({
         sessionId,
-
-        code:
-          file
-            ? file.content
-            : "",
-
+        code: targetFile ? targetFile.content : "",
         explanation,
-
-        sources,
+        sources: deduped,
       });
-
-      // ------------------------------------------------------
-      // 4I. RESPONSE
-      // ------------------------------------------------------
 
       return res.json({
         success: true,
-
-        code:
-          file
-            ? file.content
-            : null,
-
-        file:
-          file
-            ? {
-                fileName:
-                  file.fileName,
-
-                filePath:
-                  file.filePath,
-
-                extension:
-                  file.extension,
-              }
-            : null,
-
+        code: targetFile ? targetFile.content : null,
+        file: targetFile
+          ? {
+              fileName: targetFile.fileName,
+              filePath: targetFile.filePath,
+              extension: targetFile.extension,
+            }
+          : null,
         explanation,
+        sources: deduped,
+      });
+    }
 
+    //repository overview logic for REPO_OVERVIEW queries
+
+    if (queryType === "REPO_OVERVIEW") {
+      const files = Array.isArray(session.repositoryId.files)
+        ? session.repositoryId.files
+        : [];
+
+      const readmeFile = files.find(
+        (f) => f.fileName.toLowerCase() === "readme.md",
+      );
+      const packageJson = files.find(
+        (f) => f.fileName.toLowerCase() === "package.json",
+      );
+      const filePathsList = files
+        .slice(0, 50)
+        .map((f) => f.filePath)
+        .join("\n");
+
+      let context = `REPOSITORY NAME: ${dbRepoName}\n\n`;
+      context += `DIRECTORY STRUCTURE (Capped to first 50 files):\n${filePathsList}\n\n`;
+
+      const sources = [];
+      if (readmeFile) {
+        context += `README.md CONTENT:\n${readmeFile.content.slice(0, 4000)}\n\n`;
+        sources.push({ file: readmeFile.filePath, source: "mongodb" });
+      }
+      if (packageJson) {
+        context += `package.json CONTENT:\n${packageJson.content.slice(0, 2000)}\n\n`;
+        sources.push({ file: packageJson.filePath, source: "mongodb" });
+      }
+
+      console.log("Sending REPO_OVERVIEW request to Groq...");
+      const answer = await askLLM(question, context, history);
+
+      await saveAssistantMessage({
+        sessionId,
+        answer,
+        sources,
+      });
+
+      return res.json({
+        success: true,
+        answer,
         sources,
       });
     }
 
-    // ========================================================
-    // 5. NORMAL CODE QUESTION
-    // ChromaDB + Groq
-    // ========================================================
+    //semantic code question logic for SEMANTIC_CODE_QUESTION queries
 
-    console.log(
-      "NORMAL CODE QUESTION"
-    );
+    console.log("SEMANTIC CODE QUESTION / FALLBACK");
 
-    console.log(
-      "Searching ChromaDB..."
-    );
+    const files = Array.isArray(session.repositoryId.files)
+      ? session.repositoryId.files
+      : [];
 
-    const results =
-      await searchChunks(
-        question,
-        repoName
+    const fileName = route.fileName;
+    let targetFile = null;
+    let mongoSource = null;
+
+    if (fileName) {
+      targetFile = files.find(
+        (f) => f.fileName.toLowerCase() === fileName.toLowerCase(),
       );
+      if (targetFile) {
+        mongoSource = {
+          file: targetFile.filePath,
+          source: "mongodb",
+        };
+      }
+    }
 
-    const documents =
-      results?.documents?.[0] || [];
-
-    const metadatas =
-      results?.metadatas?.[0] || [];
-
-    console.log(
-      "ChromaDB documents:",
-      documents.length
+    const { documents, metadatas } = await safeSearchChunks(
+      question,
+      dbRepoName,
+      repoId,
+      targetFile ? targetFile.filePath : null,
     );
 
-    // ------------------------------------------------------
-    // BUILD HYBRID CONTEXT (MongoDB File List + ChromaDB Code Chunks)
-    // ------------------------------------------------------
-    const repoFiles = await getRepositoryFiles(repoName);
-    const fileListString = repoFiles.map((f) => f.filePath).join("\n");
+    const fileListString = files
+      .slice(0, 50)
+      .map((f) => f.filePath)
+      .join("\n");
 
-    const context = `
-REPOSITORY FILES INVENTORY (from MongoDB):
+    let context = "";
+    if (targetFile) {
+      context += `
+==================================================
+TARGET FILE CONTENT (mongodb)
+==================================================
+File Path: ${targetFile.filePath}
+Content:
+${targetFile.content}
+==================================================
+`;
+    }
+
+    context += `
+REPOSITORY FILES INVENTORY:
 ${fileListString || "No files found"}
 
 SEMANTIC CODE CHUNKS (from ChromaDB):
-${documents.map((document, index) => {
-  const metadata = metadatas[index];
-  return `
-File: ${metadata?.filePath || "Unknown"}
-Code:
-${document}
-`;
-}).join("\n\n")}
+${documents
+  .map((doc, idx) => {
+    const meta = metadatas[idx];
+    return `File: ${meta?.filePath || "Unknown"}\nCode:\n${doc}`;
+  })
+  .join("\n\n")}
 `;
 
-    // ------------------------------------------------------
-    // HISTORY
-    // ------------------------------------------------------
+    console.log("Sending semantic question to Groq...");
+    const answer = await askLLM(question, context, history);
 
-    // ------------------------------------------------------
-    // GROQ
-    // ------------------------------------------------------
-
-    console.log(
-      "Sending normal question to Groq..."
-    );
-
-    const answer =
-      await askLLM(
-        question,
-        context,
-        history
-      );
-
-    //     // ------------------------------------------------------
-    // SOURCES (Hybrid: MongoDB + ChromaDB)
-    // ------------------------------------------------------
     const sources = [];
-
-    // 1. Add MongoDB files
-    repoFiles.forEach((file) => {
-      sources.push({
-        file: file.filePath,
-        source: "mongodb",
-      });
-    });
-
-    // 2. Add ChromaDB search chunks
-    metadatas.forEach((metadata) => {
-      if (metadata?.filePath) {
+    if (mongoSource) {
+      sources.push(mongoSource);
+    }
+    metadatas.forEach((m) => {
+      if (m?.filePath) {
         sources.push({
-          file: metadata.filePath,
-          chunk: metadata.chunkIndex,
+          file: m.filePath,
+          chunk: m.chunkIndex,
           source: "chromadb",
         });
       }
     });
-    // ------------------------------------------------------
-    // SAVE
-    // ------------------------------------------------------
+
+    const deduped = dedupeSources(sources);
 
     await saveAssistantMessage({
       sessionId,
       answer,
-      sources,
+      sources: deduped,
     });
-
-    // ------------------------------------------------------
-    // RESPONSE
-    // ------------------------------------------------------
 
     return res.json({
       success: true,
       answer,
-      sources,
+      sources: deduped,
     });
-
   } catch (error) {
-    console.error(
-      "Chat error:",
-      error
-    );
+    console.error("Chat error:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.message,
+      message: error.message,
     });
   }
 };
 
-// ============================================================
-// GET ALL SESSIONS
-// ============================================================
+//get all chat sessions for the user, sorted by last updated
 
-export const getAllSessions =
-  async (req, res) => {
-    try {
-      const sessions =
-        await ChatSession.find()
-          .populate(
-            "repositoryId",
-            "repoName"
-          )
-          .sort({
-            updatedAt: -1,
-          });
-
-      return res.json({
-        success: true,
-        sessions,
+export const getAllSessions = async (req, res) => {
+  try {
+    const sessions = await ChatSession.find()
+      .populate("repositoryId", "repoName")
+      .sort({
+        updatedAt: -1,
       });
 
-    } catch (error) {
-      console.error(
-        "Failed to load all sessions:",
-        error
-      );
+    return res.json({
+      success: true,
+      sessions,
+    });
+  } catch (error) {
+    console.error("Failed to load all sessions:", error);
 
-      return res.status(500).json({
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+//get all chat sessions for a specific repository, sorted by last updated
+
+export const getSessions = async (req, res) => {
+  try {
+    const { repositoryId } = req.params;
+
+    const sessions = await ChatSession.find({
+      repositoryId,
+    })
+      .populate("repositoryId", "repoName")
+      .sort({
+        createdAt: -1,
+      });
+
+    return res.json({
+      success: true,
+      sessions,
+    });
+  } catch (error) {
+    console.error("Get sessions error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+//get all messages for a specific chat session, sorted by creation time
+
+export const getSessionMessages = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findById(sessionId).populate(
+      "repositoryId",
+      "repoName",
+    );
+
+    if (!session) {
+      return res.status(404).json({
         success: false,
-        message:
-          error.message,
+        message: "Session not found",
       });
     }
-  };
 
-// ============================================================
-// GET SESSIONS FOR REPOSITORY
-// ============================================================
+    const messages = await ChatMessage.find({
+      sessionId,
+    }).sort({
+      createdAt: 1,
+    });
 
-export const getSessions =
-  async (req, res) => {
-    try {
-      const {
-        repositoryId,
-      } = req.params;
+    return res.json({
+      success: true,
+      session,
+      messages,
+    });
+  } catch (error) {
+    console.error("Get session messages error:", error);
 
-      const sessions =
-        await ChatSession.find({
-          repositoryId,
-        })
-          .populate(
-            "repositoryId",
-            "repoName"
-          )
-          .sort({
-            createdAt: -1,
-          });
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
-      return res.json({
-        success: true,
-        sessions,
-      });
+//create a new chat session for a specific repository
 
-    } catch (error) {
-      console.error(
-        "Get sessions error:",
-        error
-      );
+export const createSession = async (req, res) => {
+  try {
+    const { repositoryId, title } = req.body;
 
-      return res.status(500).json({
+    if (!repositoryId) {
+      return res.status(400).json({
         success: false,
-        message:
-          error.message,
+        message: "repositoryId is required",
       });
     }
-  };
 
-// ============================================================
-// GET SESSION MESSAGES
-// ============================================================
+    const session = await ChatSession.create({
+      repositoryId,
 
-export const getSessionMessages =
-  async (req, res) => {
-    try {
-      const {
-        sessionId,
-      } = req.params;
+      title: title || "New Chat",
+    });
 
-      const session =
-        await ChatSession.findById(
-          sessionId
-        ).populate(
-          "repositoryId",
-          "repoName"
-        );
+    const populatedSession = await ChatSession.findById(session._id).populate(
+      "repositoryId",
+      "repoName",
+    );
 
-      if (!session) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Session not found",
-        });
-      }
+    return res.json({
+      success: true,
+      session: populatedSession,
+    });
+  } catch (error) {
+    console.error("Create session error:", error);
 
-      const messages =
-        await ChatMessage.find({
-          sessionId,
-        }).sort({
-          createdAt: 1,
-        });
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
-      return res.json({
-        success: true,
-        session,
-        messages,
-      });
+//delete a chat session and all its messages
 
-    } catch (error) {
-      console.error(
-        "Get session messages error:",
-        error
-      );
+export const deleteSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
 
-      return res.status(500).json({
+    if (!sessionId) {
+      return res.status(400).json({
         success: false,
-        message:
-          error.message,
+        message: "sessionId is required",
       });
     }
-  };
 
-// ============================================================
-// CREATE SESSION
-// ============================================================
+    // Delete messages first
+    await ChatMessage.deleteMany({
+      sessionId,
+    });
 
-export const createSession =
-  async (req, res) => {
-    try {
-      const {
-        repositoryId,
-        title,
-      } = req.body;
+    // Delete session
+    const deletedSession = await ChatSession.findByIdAndDelete(sessionId);
 
-      if (!repositoryId) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "repositoryId is required",
-        });
-      }
-
-      const session =
-        await ChatSession.create({
-          repositoryId,
-
-          title:
-            title || "New Chat",
-        });
-
-      const populatedSession =
-        await ChatSession.findById(
-          session._id
-        ).populate(
-          "repositoryId",
-          "repoName"
-        );
-
-      return res.json({
-        success: true,
-        session:
-          populatedSession,
-      });
-
-    } catch (error) {
-      console.error(
-        "Create session error:",
-        error
-      );
-
-      return res.status(500).json({
+    if (!deletedSession) {
+      return res.status(404).json({
         success: false,
-        message:
-          error.message,
+        message: "Chat session not found",
       });
     }
-  };
 
-// ============================================================
-// DELETE SESSION
-// ============================================================
+    return res.json({
+      success: true,
 
-export const deleteSession =
-  async (req, res) => {
-    try {
-      const {
-        sessionId,
-      } = req.params;
+      message: "Chat session deleted successfully",
 
-      if (!sessionId) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "sessionId is required",
-        });
-      }
+      sessionId,
+    });
+  } catch (error) {
+    console.error("Delete session error:", error);
 
-      // Delete messages first
-      await ChatMessage.deleteMany({
-        sessionId,
-      });
-
-      // Delete session
-      const deletedSession =
-        await ChatSession.findByIdAndDelete(
-          sessionId
-        );
-
-      if (!deletedSession) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Chat session not found",
-        });
-      }
-
-      return res.json({
-        success: true,
-
-        message:
-          "Chat session deleted successfully",
-
-        sessionId,
-      });
-
-    } catch (error) {
-      console.error(
-        "Delete session error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          error.message,
-      });
-    }
-  };
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};

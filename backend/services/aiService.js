@@ -9,7 +9,7 @@ const AI_SERVICE_URL = process.env.AI_SERVICE_URL;
 
 
 
-export const searchChunks = async (query,repoName,filePath=null) => {
+export const searchChunks = async (query, repoName, repoId = null, filePath = null) => {
 
     const response = await axios.post(
 
@@ -18,6 +18,7 @@ export const searchChunks = async (query,repoName,filePath=null) => {
         {
             query,
             repoName,
+            repoId,
             filePath,
             top_k: 5
         }

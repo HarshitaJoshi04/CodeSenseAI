@@ -53,13 +53,16 @@ export const getCodeFiles = (repoPath) => {
 
             // File
             else {
-
                 const extension = path.extname(item);
+                const lowerItem = item.toLowerCase();
 
-                if (SUPPORTED_EXTENSIONS.includes(extension)) {
-                    codeFiles.push(fullPath);
+                if (lowerItem === "package-lock.json" || lowerItem === "yarn.lock" || lowerItem === "pnpm-lock.yaml") {
+                    continue;
                 }
 
+                if (SUPPORTED_EXTENSIONS.includes(extension) || lowerItem === "package.json" || lowerItem === "readme.md") {
+                    codeFiles.push(fullPath);
+                }
             }
 
         }
