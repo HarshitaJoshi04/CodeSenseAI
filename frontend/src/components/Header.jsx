@@ -1,45 +1,265 @@
 import React from "react";
 
-export default function Header({ currentPage, onNavigate, onNewAnalysis }) {
+export default function Header({
+  currentPage,
+  onNavigate,
+  onNewAnalysis,
+}) {
   return (
-    <header className="bg-slate-800 text-white">
-      <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-500 rounded flex items-center justify-center font-bold">
+    <header className="sticky top-0 z-50 border-b border-cyan-200/70 bg-white/95 text-slate-800 shadow-sm backdrop-blur-md">
+      
+      <div
+        className="
+          mx-auto
+          flex
+          w-full
+          max-w-[1600px]
+          items-center
+          justify-between
+          gap-3
+          px-3
+          py-2.5
+          sm:px-6
+          sm:py-3
+          lg:px-8
+        "
+      >
+
+        {/* =========================
+            LOGO + TITLE
+        ========================== */}
+
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+
+          {/* LOGO */}
+
+          <div
+            className="
+              flex
+              h-9
+              w-9
+              shrink-0
+              items-center
+              justify-center
+              rounded-xl
+              bg-gradient-to-b
+              from-blue-500
+              to-sky-500
+              text-xs
+              font-extrabold
+              text-white
+              shadow-lg
+              shadow-sky-200
+
+              sm:h-11
+              sm:w-11
+              sm:text-sm
+            "
+          >
             CS
           </div>
 
-          <div>
-            <h1 className="text-xl font-semibold">CodeSenseAI</h1>
 
-            <div className="text-sm text-slate-200">
+          {/* TITLE */}
+
+          <div className="min-w-0">
+
+            <h1
+              className="
+                truncate
+                text-sm
+                font-extrabold
+                tracking-tight
+                text-slate-800
+
+                sm:text-lg
+                lg:text-xl
+              "
+            >
+              CodeSenseAI
+            </h1>
+
+            <p
+              className="
+                hidden
+                truncate
+                text-xs
+                font-semibold
+                text-cyan-600
+
+                sm:block
+                sm:text-xs
+                lg:text-sm
+              "
+            >
               Repository-aware developer assistant
-            </div>
+            </p>
+
           </div>
+
         </div>
 
-        <div className="flex items-center gap-3">
+
+        {/* =========================
+            NAVIGATION
+        ========================== */}
+
+        <nav
+          className="
+            flex
+            shrink-0
+            items-center
+            gap-1
+
+            sm:gap-2
+            lg:gap-3
+          "
+        >
+
+          {/* HOME */}
+
           <button
             onClick={() => onNavigate("home")}
-            className="px-4 py-2 bg-indigo-500 rounded"
+            aria-label="Home"
+            className={`
+              flex
+              items-center
+              justify-center
+              rounded-xl
+              px-2.5
+              py-2
+              text-sm
+              font-bold
+              transition-all
+              duration-200
+
+              sm:px-3
+              lg:px-4
+
+              ${
+                currentPage === "home"
+                  ? `
+                    bg-gradient-to-b
+                    from-blue-500
+                    to-sky-500
+                    text-white
+                    shadow-md
+                    shadow-sky-200
+                  `
+                  : `
+                    text-slate-600
+                    hover:bg-cyan-50
+                    hover:text-blue-600
+                  `
+              }
+            `}
           >
-            🏠 Home
+            <span className="text-sm sm:mr-1">
+              🏠
+            </span>
+
+            <span className="hidden sm:inline">
+              Home
+            </span>
           </button>
+
+
+          {/* HISTORY */}
 
           <button
             onClick={() => onNavigate("history")}
-            className="px-4 py-2 hover:bg-slate-700 rounded"
+            aria-label="History"
+            className={`
+              flex
+              items-center
+              justify-center
+              rounded-xl
+              px-2.5
+              py-2
+              text-sm
+              font-bold
+              transition-all
+              duration-200
+
+              sm:px-3
+              lg:px-4
+
+              ${
+                currentPage === "history"
+                  ? `
+                    bg-gradient-to-b
+                    from-blue-500
+                    to-sky-500
+                    text-white
+                    shadow-md
+                    shadow-sky-200
+                  `
+                  : `
+                    text-slate-600
+                    hover:bg-cyan-50
+                    hover:text-blue-600
+                  `
+              }
+            `}
           >
-            📚 History
+            <span className="text-sm sm:mr-1">
+              📚
+            </span>
+
+            <span className="hidden sm:inline">
+              History
+            </span>
           </button>
+
+
+          {/* NEW ANALYSIS */}
 
           <button
             onClick={onNewAnalysis}
-            className="px-4 py-2 bg-slate-600 hover:bg-slate-500 rounded"
+            aria-label="New Analysis"
+            className="
+              flex
+              items-center
+              justify-center
+              rounded-xl
+              border
+              border-cyan-300
+              bg-gradient-to-r
+              from-cyan-50
+              to-sky-50
+              px-2.5
+              py-2
+              text-sm
+              font-bold
+              text-cyan-700
+
+              transition-all
+              duration-200
+
+              hover:border-cyan-400
+              hover:from-cyan-100
+              hover:to-sky-100
+              hover:text-blue-700
+
+              shadow-sm
+              hover:shadow-md
+              hover:shadow-cyan-100
+
+              sm:px-3
+              lg:px-4
+            "
           >
-            ＋ New Analysis
+            <span className="text-base">
+              ＋
+            </span>
+
+            <span className="hidden sm:inline">
+              &nbsp;New Analysis
+            </span>
           </button>
-        </div>
+
+        </nav>
+
       </div>
     </header>
   );

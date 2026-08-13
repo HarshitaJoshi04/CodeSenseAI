@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import api from "../api";
-export default function HistoryPage({ onSelectSession }) {
+
+export default function HistoryPage({ activeSessionId, onSelectSession }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -32,108 +32,326 @@ export default function HistoryPage({ onSelectSession }) {
     onSelectSession(session);
   };
 
+  const handleDeleteSession = async (e, sessionId) => {
+    e.stopPropagation();
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this chat?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await api.delete(`/api/chat/sessions/${sessionId}`);
+      setSessions((prev) =>
+        prev.filter((session) => session._id !== sessionId),
+      );
+      if (sessionId === activeSessionId) {
+        onSelectSession(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete session:", err);
+      alert("Failed to delete chat session.");
+    }
+  };
+
+  // =========================
+  // LOADING
+  // =========================
+
   if (loading) {
     return (
-      <div className="bg-white rounded shadow p-8">
-        <div className="text-center text-slate-500">
-          Loading your conversations...
+      <div className="rounded-2xl border border-sky-100 bg-white p-10 shadow-md">
+        <div className="flex flex-col items-center justify-center text-center">
+
+          <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-sky-100 border-t-blue-500" />
+
+          <p className="text-sm font-bold text-slate-700">
+            Loading your conversations...
+          </p>
+
+          <p className="mt-1 text-xs text-slate-400">
+            Please wait a moment
+          </p>
+
         </div>
       </div>
     );
   }
+
+  // =========================
+  // ERROR
+  // =========================
 
   if (error) {
     return (
-      <div className="bg-white rounded shadow p-8">
-        <div className="text-center text-red-500">{error}</div>
+      <div className="rounded-2xl border border-pink-200 bg-white p-10 shadow-md">
 
-        <div className="text-center mt-4">
+        <div className="text-center">
+
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-pink-50 text-2xl">
+            ⚠
+          </div>
+
+          <p className="text-sm font-bold text-pink-600">
+            {error}
+          </p>
+
           <button
             onClick={loadAllSessions}
-            className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600"
+            className="
+              mt-5
+              rounded-xl
+              bg-gradient-to-b
+              from-blue-500
+              to-sky-500
+              px-5
+              py-2.5
+              text-sm
+              font-bold
+              text-white
+              shadow-md
+              transition
+              hover:from-blue-600
+              hover:to-sky-600
+            "
           >
             Try Again
           </button>
+
         </div>
+
       </div>
     );
   }
 
-  return (
-    <div className="bg-white rounded shadow p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-800">
-            Chat History
-          </h2>
+  // =========================
+  // MAIN
+  // =========================
 
-          <p className="text-sm text-slate-500 mt-1">
-            Continue a previous conversation with your repositories.
-          </p>
+  return (
+    <div className="rounded-2xl border border-sky-100 bg-white p-6 shadow-md">
+
+      {/* HEADER */}
+
+      <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+        <div>
+
+          <div className="flex items-center gap-3">
+
+            {/* ICON */}
+
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-b from-blue-500 to-sky-500 text-lg text-white shadow-md">
+              💬
+            </div>
+
+            {/* TITLE */}
+
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">
+                Chat History
+              </h2>
+
+              <p className="mt-0.5 text-sm font-medium text-sky-600">
+                Continue a previous conversation with your repositories.
+              </p>
+            </div>
+
+          </div>
+
         </div>
+
+        {/* REFRESH */}
 
         <button
           onClick={loadAllSessions}
-          className="text-sm px-3 py-2 rounded bg-slate-100 hover:bg-slate-200 text-slate-700"
+          className="
+            rounded-xl
+            border
+            border-sky-200
+            bg-sky-50
+            px-4
+            py-2
+            text-sm
+            font-bold
+            text-blue-600
+            transition
+            hover:border-sky-300
+            hover:bg-sky-100
+          "
         >
-          ↻ Refresh
+          <span className="mr-1">↻</span>
+          Refresh
         </button>
+
       </div>
 
-      {/* Empty state */}
-      {sessions.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">💬</div>
+      {/* =========================
+          EMPTY STATE
+      ========================= */}
 
-          <h3 className="text-lg font-semibold text-slate-700">
+      {sessions.length === 0 ? (
+
+        <div className="rounded-2xl border border-dashed border-sky-200 bg-sky-50/50 py-16 text-center">
+
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-sky-100 text-3xl">
+            💬
+          </div>
+
+          <h3 className="text-lg font-bold text-slate-700">
             No conversations yet
           </h3>
 
-          <p className="text-sm text-slate-400 mt-2">
+          <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
             Start analyzing a repository and your conversations will appear
             here.
           </p>
+
         </div>
+
       ) : (
+
+        /* =========================
+           SESSION LIST
+        ========================= */
+
         <div className="space-y-3">
+
           {sessions.map((session) => (
-            <button
+
+            <div
               key={session._id}
-              onClick={() => handleSessionClick(session)}
-              className="w-full text-left border border-slate-200 rounded-lg p-4 hover:bg-slate-50 hover:border-indigo-200 transition"
+              className="
+                group
+                w-full
+                rounded-2xl
+                border
+                border-sky-100
+                bg-white
+                p-4
+                transition-all
+                duration-200
+                hover:-translate-y-[1px]
+                hover:border-sky-300
+                hover:bg-sky-50/60
+                hover:shadow-md
+                flex
+                items-center
+                justify-between
+                gap-4
+              "
             >
-              <div className="flex items-start gap-3">
-                {/* Icon */}
-                <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-lg">
-                  💬
+              <button
+                onClick={() => handleSessionClick(session)}
+                className="flex-1 text-left min-w-0"
+              >
+                <div className="flex items-start gap-4">
+                  {/* ICON */}
+                  <div
+                    className="
+                      flex
+                      h-11
+                      w-11
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-xl
+                      bg-sky-100
+                      text-lg
+                      transition
+                      group-hover:bg-sky-200
+                    "
+                  >
+                    💬
+                  </div>
+
+                  {/* SESSION INFORMATION */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3
+                        className="
+                          truncate
+                          font-bold
+                          text-slate-800
+                          transition
+                          group-hover:text-blue-600
+                        "
+                      >
+                        {session.title || "Untitled Session"}
+                      </h3>
+
+                      <span className="shrink-0 whitespace-nowrap text-xs font-medium text-slate-400">
+                        {formatDate(
+                          session.updatedAt || session.createdAt
+                        )}
+                      </span>
+                    </div>
+
+                    {/* REPOSITORY */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-pink-500" />
+                      <span className="truncate text-sm font-bold text-sky-600">
+                        {session.repositoryId?.repoName ||
+                          "Unknown repository"}
+                      </span>
+                    </div>
+
+                    {/* DESCRIPTION */}
+                    <div className="mt-2 text-xs font-medium text-slate-400">
+                      Click to continue this conversation
+                    </div>
+                  </div>
                 </div>
+              </button>
 
-                {/* Session information */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-medium text-slate-800 truncate">
-                      {session.title || "Untitled Session"}
-                    </h3>
+              <div className="flex items-center gap-3">
+                {/* DELETE BUTTON */}
+                <button
+                  onClick={(e) => handleDeleteSession(e, session._id)}
+                  className="
+                    rounded-xl
+                    p-2.5
+                    text-slate-300
+                    transition-all
+                    duration-150
+                    opacity-100
+                    sm:opacity-0
+                    sm:group-hover:opacity-100
+                    hover:bg-pink-50
+                    hover:text-pink-600
+                  "
+                  title="Delete conversation"
+                >
+                  🗑️
+                </button>
 
-                    <span className="text-xs text-slate-400 whitespace-nowrap">
-                      {formatDate(session.updatedAt || session.createdAt)}
-                    </span>
-                  </div>
-
-                  <div className="text-sm text-indigo-600 mt-1">
-                    {session.repositoryId?.repoName || "Unknown repository"}
-                  </div>
-
-                  <div className="text-xs text-slate-400 mt-2">
-                    Click to continue this conversation
-                  </div>
+                {/* ARROW */}
+                <div
+                  className="
+                    hidden
+                    self-center
+                    text-lg
+                    font-bold
+                    text-sky-300
+                    transition
+                    group-hover:translate-x-1
+                    group-hover:text-blue-500
+                    sm:block
+                  "
+                >
+                  →
                 </div>
               </div>
-            </button>
+            </div>
+
           ))}
+
         </div>
+
       )}
+
     </div>
   );
 }
@@ -144,7 +362,8 @@ function formatDate(date) {
   const sessionDate = new Date(date);
   const now = new Date();
 
-  const isToday = sessionDate.toDateString() === now.toDateString();
+  const isToday =
+    sessionDate.toDateString() === now.toDateString();
 
   if (isToday) {
     return sessionDate.toLocaleTimeString([], {
