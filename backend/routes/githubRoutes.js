@@ -5,8 +5,8 @@ import {
   removeRepository,
 } from "../controllers/githubController.js";
 
-import { protect } from "../middleware.js/authMiddleware.js";
-import { analysisLimit } from "../middleware.js/limitMiddleware.js";
+import { protect } from "../middleware/authMiddleware.js";
+import { analysisLimit } from "../middleware/limitMiddleware.js";
 
 const router = express.Router();
 
