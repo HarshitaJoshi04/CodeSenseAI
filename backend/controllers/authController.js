@@ -3,7 +3,17 @@ import jwt from "jsonwebtoken";
 
 import User from "../models/Users.js";
 
+import Repository from "../models/Repository.js";
 
+// Helper to create JWTs — centralizes secret check so missing JWT_SECRET fails fast with a clear error
+const createToken = (userId) => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    // Throwing here is caught by the surrounding try/catch and returns a 500 with a clear server-side message
+    throw new Error("JWT_SECRET not configured");
+  }
+  return jwt.sign({ userId }, secret, { expiresIn: "7d" });
+};
 // ===============================
 // REGISTER
 // ===============================
@@ -47,15 +57,7 @@ export const register = async (req, res) => {
             password: hashedPassword,
         });
 
-        const token = jwt.sign(
-            {
-                userId: user._id,
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: "7d",
-            }
-        );
+        const token = createToken(user._id);
 
         res.status(201).json({
             success: true,
@@ -122,15 +124,7 @@ export const login = async (req, res) => {
             });
         }
 
-        const token = jwt.sign(
-            {
-                userId: user._id,
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: "7d",
-            }
-        );
+        const token = createToken(user._id);
 
         res.json({
             success: true,
@@ -154,4 +148,37 @@ export const login = async (req, res) => {
             message: "Login failed",
         });
     }
+};
+
+
+export const getUsage = async (req, res) => {
+  try {
+    if (!req.userId || !req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const repositoryCount = await Repository.countDocuments({
+      userId: req.userId,
+    });
+
+    return res.json({
+      success: true,
+      usage: {
+        // Active repositories is the authoritative usage metric
+        analysesUsed: repositoryCount,
+        analysesLimit: req.user.limits.maxRepositories,
+      },
+    });
+
+  } catch (error) {
+    console.error("GET USAGE ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get usage",
+    });
+  }
 };

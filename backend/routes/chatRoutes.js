@@ -5,22 +5,27 @@ import {
     getAllSessions,
     getSessionMessages,
     createSession,
-     deleteSession
+    deleteSession
 } from "../controllers/chatController.js";
+
+import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/", chat);
+// All chat routes require authentication
+router.post("/", protect, chat);
 
-router.post("/sessions", createSession);
+router.post("/sessions", protect, createSession);
 
-// All sessions across all repositories
-router.get("/sessions", getAllSessions);
+// All sessions across the authenticated user's repositories
+router.get("/sessions", protect, getAllSessions);
 
-// Sessions belonging to one repository
-router.get("/sessions/:repositoryId", getSessions);
+// Sessions belonging to one repository (must be user's own)
+router.get("/sessions/:repositoryId", protect, getSessions);
 
-// Messages belonging to one session
-router.get("/sessions/:sessionId/messages", getSessionMessages);
-router.delete("/sessions/:sessionId", deleteSession);
+// Messages belonging to one session (must be user's own)
+router.get("/sessions/:sessionId/messages", protect, getSessionMessages);
+
+router.delete("/sessions/:sessionId", protect, deleteSession);
+
 export default router;

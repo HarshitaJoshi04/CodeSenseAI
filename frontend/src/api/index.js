@@ -7,6 +7,15 @@ const api = axios.create({
   },
 });
 
+// Attach JWT token from localStorage to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const analyzeRepository = async (repoUrl) => {
   const response = await api.post("/api/github/process", {
     repoUrl,
@@ -24,7 +33,7 @@ export const deleteRepository = async (repositoryId) => {
 };
 
 
-export const askQuestion = async (question,repoName,sessionId) => {
+export const askQuestion = async (question, repoName, sessionId) => {
   const response = await api.post("/api/chat", {
     question,
     repoName,

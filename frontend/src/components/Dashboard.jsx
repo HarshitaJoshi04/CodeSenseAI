@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { deleteRepository } from "../api";
+import React, { useEffect, useState } from "react";
+import { deleteRepository, getUsage } from "../api";
 import Header from "./Header";
 import RepoForm from "./RepoForm";
 import RepoStatus from "./RepoStatus";
@@ -7,9 +7,37 @@ import ChatPanel from "./ChatPanel";
 import ChatHistory from "./ChatHistory";
 import HistoryPage from "./HistoryPage";
 import { useNavigate } from "react-router-dom";
+import UsageCard from "./UsageCard";
+
 export default function Dashboard() {
+  
 const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState("home");
+  
+const [usage, setUsage] = useState({
+  analysesUsed: 0,
+  analysesLimit: 1,
+  repositoriesUsed: 0,
+  repositoriesLimit: 3,
+});
+
+useEffect(() => {
+  const loadUsage = async () => {
+    try {
+      const data = await getUsage();
+
+      console.log("CURRENT USAGE:", data);
+
+      if (data?.success && data?.usage) {
+        setUsage(data.usage);
+      }
+    } catch (error) {
+      console.error("Failed to load usage:", error);
+    }
+  };
+
+  loadUsage();
+}, []);
 
   // RESTORE CURRENT REPOSITORY AFTER REFRESH
   const [repoState, setRepoState] = useState({
@@ -212,6 +240,7 @@ return (
   onNavigate={setCurrentPage}
   onNewAnalysis={handleNewAnalysis}
   onLogout={handleLogout}
+   usage={usage}
 />
 
     {/* =========================
@@ -229,7 +258,7 @@ return (
               LEFT SIDEBAR
           ========================== */}
           <aside className="space-y-5">
-
+<UsageCard usage={usage} />
             {/* REPOSITORY CARD */}
             <section className="overflow-hidden rounded-2xl border border-cyan-200 bg-white/90 shadow-lg shadow-cyan-100/60 backdrop-blur">
 
@@ -256,10 +285,11 @@ return (
               </div>
 
               <div className="p-5">
-                <RepoForm
-                  setRepoState={setRepoState}
-                  setChatContext={setChatContext}
-                />
+<RepoForm
+  setRepoState={setRepoState}
+  setChatContext={setChatContext}
+  setUsage={setUsage}
+/>
               </div>
 
             </section>

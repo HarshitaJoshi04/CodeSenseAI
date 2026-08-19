@@ -26,6 +26,11 @@ export const analyzeRepository = async (repoUrl) => {
   return response.data;
 };
 
+export const getUsage = async () => {
+  const response = await api.get("/api/auth/usage");
+  return response.data;
+};
+
 export const deleteRepository = async (repositoryId) => {
   const response = await api.delete(
     `/api/github/repository/${repositoryId}`

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { analyzeRepository } from "../api";
 
-export default function RepoForm({ setRepoState, setChatContext }) {
+export default function RepoForm({ setRepoState, setChatContext,  setUsage }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -38,9 +38,11 @@ export default function RepoForm({ setRepoState, setChatContext }) {
       });
 
       const data = await analyzeRepository(url.trim());
-
+       
       console.log("ANALYZE RESPONSE:", data);
-
+      if (data?.usage) {
+  setUsage(data.usage);
+}
       if (data?.success) {
         setRepoState({
           status: "success",

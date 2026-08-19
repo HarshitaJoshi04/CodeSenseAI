@@ -138,6 +138,14 @@ export const chat = async (req, res) => {
       });
     }
 
+    // Verify this session's repository belongs to the logged-in user
+    if (session.repositoryId.userId.toString() !== req.userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
     const repoId = session.repositoryId._id.toString();
     const dbRepoName = session.repositoryId.repoName;
 
@@ -751,15 +759,20 @@ ${documents
   }
 };
 
-//get all chat sessions for the user, sorted by last updated
+//get all chat sessions for the authenticated user, sorted by last updated
 
 export const getAllSessions = async (req, res) => {
   try {
-    const sessions = await ChatSession.find()
+    // First get all repository IDs owned by this user
+    const userRepos = await Repository.find(
+      { userId: req.userId },
+      { _id: 1 }
+    );
+    const repoIds = userRepos.map((r) => r._id);
+
+    const sessions = await ChatSession.find({ repositoryId: { $in: repoIds } })
       .populate("repositoryId", "repoName")
-      .sort({
-        updatedAt: -1,
-      });
+      .sort({ updatedAt: -1 });
 
     return res.json({
       success: true,
@@ -780,6 +793,19 @@ export const getAllSessions = async (req, res) => {
 export const getSessions = async (req, res) => {
   try {
     const { repositoryId } = req.params;
+
+    // Verify this repository belongs to the authenticated user
+    const repository = await Repository.findOne({
+      _id: repositoryId,
+      userId: req.userId,
+    });
+
+    if (!repository) {
+      return res.status(404).json({
+        success: false,
+        message: "Repository not found",
+      });
+    }
 
     const sessions = await ChatSession.find({
       repositoryId,
@@ -811,13 +837,24 @@ export const getSessionMessages = async (req, res) => {
 
     const session = await ChatSession.findById(sessionId).populate(
       "repositoryId",
-      "repoName",
+      "repoName userId",
     );
 
     if (!session) {
       return res.status(404).json({
         success: false,
         message: "Session not found",
+      });
+    }
+
+    // Verify this session's repository belongs to the authenticated user
+    if (
+      !session.repositoryId ||
+      session.repositoryId.userId.toString() !== req.userId.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
       });
     }
 
@@ -855,9 +892,21 @@ export const createSession = async (req, res) => {
       });
     }
 
+    // Verify this repository belongs to the authenticated user
+    const repository = await Repository.findOne({
+      _id: repositoryId,
+      userId: req.userId,
+    });
+
+    if (!repository) {
+      return res.status(404).json({
+        success: false,
+        message: "Repository not found",
+      });
+    }
+
     const session = await ChatSession.create({
       repositoryId,
-
       title: title || "New Chat",
     });
 
@@ -893,26 +942,40 @@ export const deleteSession = async (req, res) => {
       });
     }
 
-    // Delete messages first
-    await ChatMessage.deleteMany({
-      sessionId,
-    });
+    // Verify ownership: session → repository → userId
+    const session = await ChatSession.findById(sessionId).populate(
+      "repositoryId",
+      "userId",
+    );
 
-    // Delete session
-    const deletedSession = await ChatSession.findByIdAndDelete(sessionId);
-
-    if (!deletedSession) {
+    if (!session) {
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
       });
     }
 
+    if (
+      !session.repositoryId ||
+      session.repositoryId.userId.toString() !== req.userId.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    // Delete messages first
+    await ChatMessage.deleteMany({
+      sessionId,
+    });
+
+    // Delete session
+    await ChatSession.findByIdAndDelete(sessionId);
+
     return res.json({
       success: true,
-
       message: "Chat session deleted successfully",
-
       sessionId,
     });
   } catch (error) {

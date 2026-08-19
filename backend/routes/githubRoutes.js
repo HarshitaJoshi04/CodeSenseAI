@@ -6,7 +6,7 @@ import {
 } from "../controllers/githubController.js";
 
 import { protect } from "../middleware/authMiddleware.js";
-import { analysisLimit } from "../middleware/limitMiddleware.js";
+import { analysisLimit } from "../middleware/usageLimitMiddleware.js";
 
 const router = express.Router();
 
