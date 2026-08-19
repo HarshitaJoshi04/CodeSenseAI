@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { deleteRepository } from "./api";
 import Header from "./components/Header";
 import RepoForm from "./components/RepoForm";
 import RepoStatus from "./components/RepoStatus";
@@ -127,6 +128,64 @@ export default function App() {
     setCurrentPage("home");
   };
 
+  const handleDeleteRepository = async () => {
+  const repositoryId = chatContext.repositoryId;
+
+  if (!repositoryId) {
+    alert("No repository selected.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Delete ${chatContext.repoName || "this repository"}?\n\n` +
+    "This will permanently delete the repository, files, chat history, " +
+    "server clone, and AI/vector data."
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const result = await deleteRepository(repositoryId);
+
+    console.log("DELETE REPOSITORY RESPONSE:", result);
+
+    // Clear local storage
+    localStorage.removeItem("currentSessionId");
+    localStorage.removeItem("currentRepositoryId");
+    localStorage.removeItem("currentRepoName");
+    localStorage.removeItem("currentRepoFiles");
+    localStorage.removeItem("currentRepoChunks");
+
+    // Reset repository state
+    setRepoState({
+      status: "idle",
+      repoName: null,
+      files: 0,
+      chunks: 0,
+      error: null,
+    });
+
+    // Reset chat state
+    setChatContext({
+      processed: false,
+      repositoryId: null,
+      sessionId: null,
+      repoName: null,
+    });
+
+    alert("Repository deleted successfully.");
+
+  } catch (error) {
+    console.error("Delete repository error:", error);
+
+    alert(
+      error.response?.data?.message ||
+      "Failed to delete repository."
+    );
+  }
+};
 return (
   <div className="min-h-screen bg-gradient-to-b from-cyan-50 via-sky-50 to-blue-50 text-slate-800">
 
@@ -222,7 +281,11 @@ return (
               </div>
 
               <div className="p-5">
-                <RepoStatus repoState={repoState} />
+                <RepoStatus
+  repoState={repoState}
+  repositoryId={chatContext.repositoryId}
+  onDelete={handleDeleteRepository}
+/>
               </div>
 
             </section>

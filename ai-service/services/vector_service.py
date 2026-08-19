@@ -19,6 +19,35 @@ def store_chunk(chunk_id, text, metadata):
         metadatas=[metadata]
     )
 
+def count_repository_chunks(repo_id):
+    results = collection.get(
+        where={
+            "repoId": repo_id
+        }
+    )
+
+    return len(results.get("ids", []))
+    
+def delete_repository_chunks(repo_id):
+    print("DELETING CHUNKS FOR REPO:", repo_id)
+
+    results = collection.get(
+        where={
+            "repoId": repo_id
+        }
+    )
+
+    ids = results.get("ids", [])
+
+    print("CHUNKS FOUND:", len(ids))
+
+    if ids:
+        collection.delete(ids=ids)
+
+    print("CHUNKS DELETED:", len(ids))
+
+    return len(ids)
+
 
 def search_chunks(query, repo_name, repo_id=None, top_k=5, file_path=None):
     print("QUERY:", query)

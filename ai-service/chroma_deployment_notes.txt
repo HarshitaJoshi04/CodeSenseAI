@@ -1,0 +1,95 @@
+CodeSense AI ChromaDB Deployment Notes
+====================================
+
+1) ChromaDB path
+-----------------
+The application initializes ChromaDB in ai-service/services/vector_service.py with:
+
+    client = chromadb.PersistentClient(path="./chroma_db")
+
+This means the database path is:
+- Relative path: ./chroma_db
+- Actual local folder: ai-service/chroma_db
+
+2) Is ChromaDB populated dynamically?
+------------------------------------
+Yes.
+
+The backend indexes a repository and calls the AI service to store each code chunk in ChromaDB.
+This happens in backend/services/repositoryService.js, which loops through chunks and calls storeChunk(...).
+
+The Python app stores vectors in Chroma via:
+
+    def store_chunk(chunk_id, text, metadata):
+        embedding = generate_embedding(text)
+        collection.add(
+            ids=[chunk_id],
+            documents=[text],
+            embeddings=[embedding],
+            metadatas=[metadata]
+        )
+
+So ChromaDB is populated dynamically when a repository is analyzed.
+
+3) Does the app require an existing chroma_db folder when it starts?
+--------------------------------------------------------------------
+No.
+
+The code uses:
+
+    client = chromadb.PersistentClient(path="./chroma_db")
+    collection = client.get_or_create_collection(name="repository_chunks")
+
+This creates the directory and collection automatically if they do not already exist.
+
+4) What happens when a new repository is processed?
+----------------------------------------------------
+When a repo is processed:
+1. The backend clones/indexes the repository
+2. It splits code files into text chunks
+3. It calls the Python storeChunk API for each chunk
+4. The Python service generates an embedding
+5. The chunk text, metadata, and embedding are added to Chroma collection repository_chunks
+
+5) Can the deployed service start with an empty ChromaDB directory?
+--------------------------------------------------------------------
+Yes.
+
+An empty chroma_db folder is acceptable because the app creates the collection automatically.
+
+6) Relevant code responsible for creation
+----------------------------------------
+File: ai-service/services/vector_service.py
+
+    import chromadb
+    from services.embedding_service import generate_embedding
+
+    client = chromadb.PersistentClient(path="./chroma_db")
+    collection = client.get_or_create_collection(
+        name="repository_chunks"
+    )
+
+    def store_chunk(chunk_id, text, metadata):
+        embedding = generate_embedding(text)
+        collection.add(
+            ids=[chunk_id],
+            documents=[text],
+            embeddings=[embedding],
+            metadatas=[metadata]
+        )
+
+7) Important deployment note
+----------------------------
+This is fine for local development, but for Render or any cloud deployment, the local chroma_db folder is not durable unless you attach persistent storage.
+
+On Render, the filesystem is usually ephemeral, so the vector database can be lost between deploys or restarts unless you use a persistent volume or move storage to an external service.
+
+8) Render start command
+-----------------------
+The app is a FastAPI app named app, so the correct Render launch command is:
+
+    uvicorn app:app --host 0.0.0.0 --port $PORT
+
+If Render is set to the repo root instead of the ai-service folder, use:
+
+    cd ai-service && uvicorn app:app --host 0.0.0.0 --port $PORT

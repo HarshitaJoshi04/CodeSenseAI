@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from services.vector_service import store_chunk
 from services.vector_service import search_chunks
+from services.vector_service import delete_repository_chunks
+
 app = FastAPI(title="CodeSense AI Service") #This creates your FastAPI application.
 
 @app.get("/")
@@ -41,3 +43,14 @@ def search(request: dict):
     )
 
     return results
+
+@app.delete("/repository/{repo_id}")
+def delete_repository(repo_id: str):
+
+    delete_repository_chunks(repo_id)
+
+    return {
+        "success": True,
+        "message": "Repository chunks deleted successfully",
+         "deletedChunks": deleted_count
+    } 
