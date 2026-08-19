@@ -8,7 +8,10 @@ import { storeChunk } from "./aiService.js";
 
 import Repository from "../models/Repository.js";
 
-export const indexRepository = async (repoUrl) => {
+export const indexRepository = async (
+    repoUrl,
+    userId
+) => {
 
     // 1. Clone repository
     const repository = await cloneRepo(repoUrl);
@@ -45,9 +48,11 @@ export const indexRepository = async (repoUrl) => {
     // 4. Save repository + complete files in MongoDB
 const savedRepository = await Repository.findOneAndUpdate(
     {
+        userId,
         repoName: repository.repoName,
     },
     {
+        userId,
         repoName: repository.repoName,
         repoPath: repository.repoPath,
         files: fileData,
@@ -86,11 +91,12 @@ const savedRepository = await Repository.findOneAndUpdate(
 
                 text: chunks[i].pageContent,
 
-                metadata: {
-                    ...chunks[i].metadata,
-                    repoName: repository.repoName,
-                    repoId: savedRepository._id.toString(),
-                },
+metadata: {
+    ...chunks[i].metadata,
+    repoName: repository.repoName,
+    repoId: savedRepository._id.toString(),
+    userId: userId.toString(),
+},
             });
 
             totalChunks++;

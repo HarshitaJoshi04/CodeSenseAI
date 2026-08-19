@@ -43,7 +43,10 @@ export const processRepository = async (req, res) => {
     }
 
     //repo scanning logic
-    const result = await indexRepository(repoUrl);
+   const result = await indexRepository(
+    repoUrl,
+    req.userId
+);
 
     // Create a NEW chat session
     const chatSession = await ChatSession.create({

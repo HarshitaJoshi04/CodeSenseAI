@@ -4,10 +4,11 @@ export default function Header({
   currentPage,
   onNavigate,
   onNewAnalysis,
+  onLogout,
 }) {
   return (
     <header className="sticky top-0 z-50 border-b border-cyan-200/70 bg-white/95 text-slate-800 shadow-sm backdrop-blur-md">
-      
+
       <div
         className="
           mx-auto
@@ -30,8 +31,6 @@ export default function Header({
         ========================== */}
 
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-
-          {/* LOGO */}
 
           <div
             className="
@@ -59,9 +58,6 @@ export default function Header({
             CS
           </div>
 
-
-          {/* TITLE */}
-
           <div className="min-w-0">
 
             <h1
@@ -88,7 +84,6 @@ export default function Header({
                 text-cyan-600
 
                 sm:block
-                sm:text-xs
                 lg:text-sm
               "
             >
@@ -255,6 +250,49 @@ export default function Header({
 
             <span className="hidden sm:inline">
               &nbsp;New Analysis
+            </span>
+          </button>
+
+
+          {/* LOGOUT */}
+
+          <button
+            onClick={onLogout}
+            aria-label="Logout"
+            className="
+              flex
+              items-center
+              justify-center
+              rounded-xl
+              border
+              border-red-200
+              bg-red-50
+              px-2.5
+              py-2
+              text-sm
+              font-bold
+              text-red-600
+
+              transition-all
+              duration-200
+
+              hover:border-red-300
+              hover:bg-red-100
+              hover:text-red-700
+
+              shadow-sm
+              hover:shadow-md
+
+              sm:px-3
+              lg:px-4
+            "
+          >
+            <span className="text-sm sm:mr-1">
+              🚪
+            </span>
+
+            <span className="hidden sm:inline">
+              Logout
             </span>
           </button>
 

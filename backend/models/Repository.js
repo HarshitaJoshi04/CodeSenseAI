@@ -34,10 +34,15 @@ const fileSchema = new mongoose.Schema(
 
 const repositorySchema = new mongoose.Schema(
     {
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+        },
+
         repoName: {
             type: String,
             required: true,
-            unique: true,
         },
 
         repoPath: {
@@ -53,6 +58,11 @@ const repositorySchema = new mongoose.Schema(
     {
         timestamps: true,
     }
+);
+
+repositorySchema.index(
+    { userId: 1, repoName: 1 },
+    { unique: true }
 );
 
 const Repository = mongoose.model(

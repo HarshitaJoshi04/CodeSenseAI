@@ -1,12 +1,14 @@
 import express from "express";
-import {
-    processRepository,
-    removeRepository,
-} from "../controllers/githubController.js";
+
+import { processRepository } from "../controllers/githubController.js";
+import { protect } from "../middleware.js/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/process", processRepository);
-router.delete("/repository/:repositoryId", removeRepository);
-export default router;
+router.post(
+    "/process",
+    protect,
+    processRepository
+);
 
+export default router;
